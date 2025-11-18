@@ -11,6 +11,16 @@ if (!defined('__TYPECHO_ROOT_DIR__')) exit;
  */
 class DPlayerMAX_Plugin implements Typecho_Plugin_Interface
 {
+    /**
+     * 内存缓存（用于单次请求内的缓存）
+     * @var array
+     */
+    private static $memoryCache = [];
+
+    /**
+     * 缓存TTL（秒）
+     */
+    const CACHE_TTL = 300; // 5分钟
 
     public static function activate()
     {
@@ -176,6 +186,9 @@ EOF;
             _t('启用后将在访问配置页面时自动检查GitHub上的新版本')
         );
         $form->addInput($autoUpdate);
+
+        // 渲染更新状态组件
+        echo self::renderUpdateStatusWidget();
     }
 
     public static function personalConfig(Typecho_Widget_Helper_Form $form)
@@ -249,38 +262,7 @@ EOF;
             . '(\\]?)';
     }
 
-    /**
-     * 获取GitHub远程版本号
-     * @return string|false 返回版本号或false（失败时）
-     */
-    private static function getRemoteVersion()
-    {
-        $url = 'https://raw.githubusercontent.com/GamblerIX/DPlayerMAX/main/VERSION';
-        
-        try {
-            // 设置超时和错误处理
-            $context = stream_context_create([
-                'http' => [
-                    'timeout' => 10,
-                    'ignore_errors' => true
-                ]
-            ]);
-            
-            // 尝试获取远程VERSION文件
-            $version = @file_get_contents($url, false, $context);
-            
-            if ($version === false) {
-                self::logError('无法从GitHub获取VERSION文件', 'NETWORK');
-                return false;
-            }
-            
-            // 返回trim后的版本号
-            return trim($version);
-        } catch (Exception $e) {
-            self::logError('获取远程版本异常: ' . $e->getMessage(), 'EXCEPTION');
-            return false;
-        }
-    }
+
 
     /**
      * 获取本地版本号
@@ -324,56 +306,323 @@ EOF;
     }
 
     /**
-     * 检查更新
+     * 检查更新（增强版，支持缓存和强制刷新）
+     * @param bool $forceRefresh 是否强制刷新（忽略缓存）
      * @return array 返回包含状态和信息的数组
      */
-    public static function checkUpdate()
+    public static function checkUpdate($forceRefresh = false)
     {
+        // 1. 检查自动更新是否启用
+        if (!self::isAutoUpdateEnabled()) {
+            return self::buildDisabledStatus();
+        }
+
+        // 2. 如果未强制刷新，检查内存缓存
+        if (!$forceRefresh && isset(self::$memoryCache['update_check'])) {
+            $cached = self::$memoryCache['update_check'];
+            // 检查缓存是否过期
+            if (time() - $cached['timestamp'] < self::CACHE_TTL) {
+                $cached['fromCache'] = true;
+                return $cached;
+            }
+        }
+
+        // 3. 获取本地版本
         $localVersion = self::getLocalVersion();
-        $remoteVersion = self::getRemoteVersion();
+
+        // 4. 获取远程版本（增强版）
+        $apiResult = self::fetchRemoteVersion();
+
+        // 5. 处理API请求失败的情况
+        if (!$apiResult['success']) {
+            $result = self::buildErrorStatus(
+                $localVersion,
+                $apiResult['error'],
+                $apiResult['errorType']
+            );
+            // 即使失败也缓存结果（短时间），避免频繁请求
+            self::$memoryCache['update_check'] = $result;
+            return $result;
+        }
+
+        // 6. 比较版本号
+        $remoteVersion = $apiResult['version'];
+        $compareResult = self::compareVersion($localVersion, $remoteVersion);
+
+        // 7. 构建结果
+        $result = self::buildSuccessStatus($localVersion, $remoteVersion, $compareResult);
+
+        // 8. 更新缓存
+        self::$memoryCache['update_check'] = $result;
+
+        return $result;
+    }
+
+    /**
+     * 检查自动更新是否启用
+     * @return bool
+     */
+    private static function isAutoUpdateEnabled()
+    {
+        try {
+            $options = Helper::options()->plugin('DPlayerMAX');
+            return !isset($options->autoUpdate) || $options->autoUpdate != '0';
+        } catch (Exception $e) {
+            return true;
+        }
+    }
+
+    /**
+     * 获取远程版本（增强版，带详细错误处理）
+     * @return array 返回包含成功状态、版本号、错误信息的数组
+     */
+    private static function fetchRemoteVersion()
+    {
+        $url = 'https://raw.githubusercontent.com/GamblerIX/DPlayerMAX/main/VERSION';
         
-        // 如果无法获取远程版本
-        if ($remoteVersion === false) {
+        try {
+            $context = stream_context_create([
+                'http' => [
+                    'timeout' => 10,
+                    'ignore_errors' => true,
+                    'method' => 'GET',
+                    'header' => "User-Agent: DPlayerMAX-Plugin\r\n"
+                ]
+            ]);
+
+            $startTime = microtime(true);
+            $content = @file_get_contents($url, false, $context);
+            $duration = microtime(true) - $startTime;
+
+            if ($content === false) {
+                return self::handleRequestFailure($http_response_header ?? null, $duration);
+            }
+
+            if (isset($http_response_header)) {
+                $statusCode = self::parseStatusCode($http_response_header);
+                if ($statusCode !== 200) {
+                    return self::handleHttpError($statusCode);
+                }
+            }
+
+            $version = trim($content);
+            if (!self::validateVersionFormat($version)) {
+                self::logError('版本号格式错误: ' . $version, 'FORMAT');
+                return [
+                    'success' => false,
+                    'version' => null,
+                    'error' => '版本号格式不正确',
+                    'errorType' => 'FORMAT'
+                ];
+            }
+
             return [
-                'hasUpdate' => false,
-                'localVersion' => $localVersion,
-                'remoteVersion' => null,
-                'message' => '无法连接到GitHub获取版本信息，请检查网络连接',
-                'error' => '网络连接失败'
+                'success' => true,
+                'version' => $version,
+                'error' => null,
+                'errorType' => null
+            ];
+
+        } catch (Exception $e) {
+            self::logError('获取远程版本异常: ' . $e->getMessage(), 'EXCEPTION');
+            return [
+                'success' => false,
+                'version' => null,
+                'error' => $e->getMessage(),
+                'errorType' => 'UNKNOWN'
             ];
         }
-        
-        // 比较版本号
-        $compareResult = self::compareVersion($localVersion, $remoteVersion);
-        
-        if ($compareResult > 0) {
-            // 有新版本
+    }
+
+    /**
+     * 处理请求失败
+     * @param array|null $headers HTTP响应头
+     * @param float $duration 请求耗时
+     * @return array
+     */
+    private static function handleRequestFailure($headers, $duration)
+    {
+        if ($duration >= 10) {
+            self::logError('请求超时 (耗时: ' . $duration . '秒)', 'TIMEOUT');
             return [
-                'hasUpdate' => true,
+                'success' => false,
+                'version' => null,
+                'error' => '请求超时',
+                'errorType' => 'TIMEOUT'
+            ];
+        }
+
+        self::logError('网络连接失败', 'NETWORK');
+        return [
+            'success' => false,
+            'version' => null,
+            'error' => '无法连接到GitHub',
+            'errorType' => 'NETWORK'
+        ];
+    }
+
+    /**
+     * 处理HTTP错误
+     * @param int $statusCode HTTP状态码
+     * @return array
+     */
+    private static function handleHttpError($statusCode)
+    {
+        $errorMap = [
+            404 => ['error' => '远程版本文件不存在', 'type' => 'NOT_FOUND'],
+            403 => ['error' => '无权限访问', 'type' => 'PERMISSION'],
+            429 => ['error' => 'API请求过于频繁', 'type' => 'RATE_LIMIT']
+        ];
+
+        $errorInfo = $errorMap[$statusCode] ?? ['error' => "HTTP错误: {$statusCode}", 'type' => 'HTTP_ERROR'];
+        
+        self::logError($errorInfo['error'] . " (HTTP {$statusCode})", $errorInfo['type']);
+        
+        return [
+            'success' => false,
+            'version' => null,
+            'error' => $errorInfo['error'],
+            'errorType' => $errorInfo['type']
+        ];
+    }
+
+    /**
+     * 从响应头中解析HTTP状态码
+     * @param array $headers HTTP响应头数组
+     * @return int|null
+     */
+    private static function parseStatusCode($headers)
+    {
+        if (empty($headers) || !is_array($headers)) {
+            return null;
+        }
+
+        if (preg_match('/HTTP\/\d\.\d\s+(\d+)/', $headers[0], $matches)) {
+            return (int)$matches[1];
+        }
+
+        return null;
+    }
+
+    /**
+     * 验证版本号格式
+     * @param string $version 版本号
+     * @return bool
+     */
+    private static function validateVersionFormat($version)
+    {
+        return preg_match('/^\d+\.\d+\.\d+$/', $version) === 1;
+    }
+
+    /**
+     * 构建禁用状态的返回数据
+     * @return array
+     */
+    private static function buildDisabledStatus()
+    {
+        return [
+            'status' => 'disabled',
+            'localVersion' => self::getLocalVersion(),
+            'remoteVersion' => null,
+            'hasUpdate' => false,
+            'message' => '自动检查更新已禁用',
+            'error' => null,
+            'errorType' => null,
+            'timestamp' => time(),
+            'fromCache' => false
+        ];
+    }
+
+    /**
+     * 构建错误状态的返回数据
+     * @param string $localVersion 本地版本
+     * @param string $error 错误信息
+     * @param string $errorType 错误类型
+     * @return array
+     */
+    private static function buildErrorStatus($localVersion, $error, $errorType)
+    {
+        $message = self::getErrorMessage($errorType, $error);
+
+        return [
+            'status' => 'error',
+            'localVersion' => $localVersion,
+            'remoteVersion' => null,
+            'hasUpdate' => false,
+            'message' => $message,
+            'error' => $error,
+            'errorType' => $errorType,
+            'timestamp' => time(),
+            'fromCache' => false
+        ];
+    }
+
+    /**
+     * 构建成功状态的返回数据
+     * @param string $localVersion 本地版本
+     * @param string $remoteVersion 远程版本
+     * @param int $compareResult 版本比较结果
+     * @return array
+     */
+    private static function buildSuccessStatus($localVersion, $remoteVersion, $compareResult)
+    {
+        if ($compareResult > 0) {
+            return [
+                'status' => 'update-available',
                 'localVersion' => $localVersion,
                 'remoteVersion' => $remoteVersion,
-                'message' => '发现新版本 ' . $remoteVersion . '，当前版本 ' . $localVersion,
-                'error' => null
+                'hasUpdate' => true,
+                'message' => "发现新版本 {$remoteVersion}，当前版本 {$localVersion}",
+                'error' => null,
+                'errorType' => null,
+                'timestamp' => time(),
+                'fromCache' => false
             ];
         } elseif ($compareResult === 0) {
-            // 版本相同
             return [
-                'hasUpdate' => false,
+                'status' => 'up-to-date',
                 'localVersion' => $localVersion,
                 'remoteVersion' => $remoteVersion,
-                'message' => '当前已是最新版本 ' . $localVersion,
-                'error' => null
+                'hasUpdate' => false,
+                'message' => "当前已是最新版本 {$localVersion}",
+                'error' => null,
+                'errorType' => null,
+                'timestamp' => time(),
+                'fromCache' => false
             ];
         } else {
-            // 本地版本更新
             return [
-                'hasUpdate' => false,
+                'status' => 'up-to-date',
                 'localVersion' => $localVersion,
                 'remoteVersion' => $remoteVersion,
-                'message' => '当前版本 ' . $localVersion . ' 高于远程版本 ' . $remoteVersion,
-                'error' => null
+                'hasUpdate' => false,
+                'message' => "当前版本 {$localVersion} 高于远程版本 {$remoteVersion}",
+                'error' => null,
+                'errorType' => null,
+                'timestamp' => time(),
+                'fromCache' => false
             ];
         }
+    }
+
+    /**
+     * 根据错误类型获取用户友好的错误消息
+     * @param string $errorType 错误类型
+     * @param string $error 原始错误信息
+     * @return string
+     */
+    private static function getErrorMessage($errorType, $error)
+    {
+        $messages = [
+            'NETWORK' => '无法连接到GitHub，请检查服务器网络设置',
+            'TIMEOUT' => '请求超时，请稍后重试',
+            'FORMAT' => '远程版本文件格式错误，请联系开发者',
+            'RATE_LIMIT' => 'GitHub API请求过于频繁，请1小时后再试',
+            'NOT_FOUND' => '远程版本文件不存在',
+            'PERMISSION' => '无权限访问GitHub资源'
+        ];
+
+        return $messages[$errorType] ?? '发生未知错误：' . $error;
     }
 
     /**
@@ -785,44 +1034,326 @@ EOF;
     }
 
     /**
-     * 渲染更新区域
+     * 渲染更新状态组件
+     * @return string
      */
-    private static function renderUpdateSection()
+    private static function renderUpdateStatusWidget()
     {
-        // 检查是否启用自动更新
-        try {
-            $options = Helper::options()->plugin('DPlayerMAX');
-            if (isset($options->autoUpdate) && $options->autoUpdate == '0') {
+        // 获取更新状态
+        $updateInfo = self::checkUpdate();
+        $status = $updateInfo['status'];
+        
+        // 渲染CSS样式
+        $html = self::renderStyles();
+        
+        // 开始渲染组件
+        $html .= '<div class="dplayermax-update-widget">';
+        $html .= '<div class="update-header">';
+        $html .= '<h3>插件更新状态' . self::renderStatusLight($status) . '</h3>';
+        $html .= '</div>';
+        
+        // 渲染版本信息
+        $html .= self::renderVersionInfo($updateInfo);
+        
+        // 渲染状态消息
+        $html .= '<div class="update-status">';
+        $html .= '<p class="status-message">' . htmlspecialchars($updateInfo['message']) . '</p>';
+        
+        if (isset($updateInfo['fromCache']) && $updateInfo['fromCache']) {
+            $html .= '<p class="cache-notice" style="font-size: 12px; color: #6c757d;">（使用缓存数据）</p>';
+        }
+        
+        if ($updateInfo['timestamp']) {
+            $timeStr = date('Y-m-d H:i:s', $updateInfo['timestamp']);
+            $html .= '<p class="last-check-time">最后检查: ' . htmlspecialchars($timeStr) . '</p>';
+        }
+        $html .= '</div>';
+        
+        // 渲染操作按钮
+        $html .= '<div class="update-actions">';
+        $html .= '<button type="button" id="dplayermax-check-update-btn" class="btn">检查更新</button>';
+        
+        if ($updateInfo['hasUpdate']) {
+            $html .= '<button type="button" id="dplayermax-perform-update-btn" class="btn primary">立即更新</button>';
+            $releaseUrl = 'https://github.com/GamblerIX/DPlayerMAX/releases';
+            $html .= '<a href="' . $releaseUrl . '" target="_blank" class="btn">查看更新日志</a>';
+        }
+        
+        $html .= '<span id="dplayermax-update-status" style="margin-left: 10px;"></span>';
+        $html .= '</div>';
+        
+        $html .= '</div>';
+        
+        // 添加JavaScript
+        $html .= self::renderJavaScript();
+        
+        return $html;
+    }
+
+    /**
+     * 渲染状态指示灯
+     * @param string $status 状态
+     * @return string
+     */
+    private static function renderStatusLight($status)
+    {
+        $titles = [
+            'disabled' => '自动检查更新已禁用',
+            'up-to-date' => '已是最新版本',
+            'update-available' => '有新版本可用',
+            'error' => '检查更新时出错'
+        ];
+        
+        $title = $titles[$status] ?? '未知状态';
+        
+        return sprintf(
+            '<span class="dplayermax-status-light status-%s" title="%s"></span>',
+            htmlspecialchars($status),
+            htmlspecialchars($title)
+        );
+    }
+
+    /**
+     * 渲染版本信息
+     * @param array $updateInfo 更新信息
+     * @return string
+     */
+    private static function renderVersionInfo($updateInfo)
+    {
+        $html = '<div class="version-info">';
+        $html .= '<p><strong>当前版本:</strong> ' . htmlspecialchars($updateInfo['localVersion']) . '</p>';
+        
+        if ($updateInfo['remoteVersion']) {
+            $html .= '<p><strong>最新版本:</strong> ' . htmlspecialchars($updateInfo['remoteVersion']) . '</p>';
+        }
+        
+        $html .= '</div>';
+        
+        return $html;
+    }
+
+    /**
+     * 渲染CSS样式
+     * @return string
+     */
+    private static function renderStyles()
+    {
+        return <<<CSS
+<style>
+.dplayermax-update-widget {
+    margin-top: 20px;
+    padding: 20px;
+    background: #fff;
+    border: 1px solid #e1e8ed;
+    border-radius: 4px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+.dplayermax-update-widget .update-header {
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #e1e8ed;
+}
+
+.dplayermax-update-widget .update-header h3 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    display: inline-block;
+}
+
+.dplayermax-status-light {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    margin-left: 10px;
+    box-shadow: 0 0 5px rgba(0,0,0,0.2);
+    vertical-align: middle;
+}
+
+.dplayermax-status-light.status-disabled {
+    background-color: #dc3545;
+    box-shadow: 0 0 8px rgba(220, 53, 69, 0.6);
+}
+
+.dplayermax-status-light.status-up-to-date {
+    background-color: #28a745;
+    box-shadow: 0 0 8px rgba(40, 167, 69, 0.6);
+}
+
+.dplayermax-status-light.status-update-available {
+    background-color: #ffc107;
+    box-shadow: 0 0 8px rgba(255, 193, 7, 0.6);
+    animation: dplayermax-pulse 2s infinite;
+}
+
+.dplayermax-status-light.status-error {
+    background-color: #6c757d;
+    box-shadow: 0 0 5px rgba(108, 117, 125, 0.4);
+}
+
+@keyframes dplayermax-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+.dplayermax-update-widget .version-info {
+    margin: 15px 0;
+}
+
+.dplayermax-update-widget .version-info p {
+    margin: 5px 0;
+    font-size: 14px;
+}
+
+.dplayermax-update-widget .update-status {
+    margin: 15px 0;
+}
+
+.dplayermax-update-widget .status-message {
+    font-size: 14px;
+    margin: 5px 0;
+}
+
+.dplayermax-update-widget .last-check-time {
+    font-size: 12px;
+    color: #6c757d;
+    margin: 5px 0;
+}
+
+.dplayermax-update-widget .update-actions {
+    margin-top: 15px;
+}
+
+.dplayermax-update-widget .update-actions .btn {
+    margin-right: 10px;
+}
+
+.dplayermax-update-widget .loading-spinner {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid #f3f3f3;
+    border-top: 2px solid #3498db;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    vertical-align: middle;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+@media (max-width: 768px) {
+    .dplayermax-status-light {
+        width: 16px;
+        height: 16px;
+    }
+    
+    .dplayermax-update-widget .update-actions .btn {
+        display: block;
+        margin: 5px 0;
+        width: 100%;
+    }
+}
+</style>
+CSS;
+    }
+
+    /**
+     * 渲染JavaScript
+     * @return string
+     */
+    private static function renderJavaScript()
+    {
+        $updateUrl = Helper::options()->rootUrl . '/dplayermax/update';
+        
+        return <<<JS
+<script>
+(function() {
+    var checkBtn = document.getElementById('dplayermax-check-update-btn');
+    var performBtn = document.getElementById('dplayermax-perform-update-btn');
+    var statusSpan = document.getElementById('dplayermax-update-status');
+    var lastClickTime = 0;
+    
+    // 防抖处理
+    function debounce(func, wait) {
+        var timeout;
+        return function() {
+            var context = this, args = arguments;
+            clearTimeout(timeout);
+            timeout = setTimeout(function() {
+                func.apply(context, args);
+            }, wait);
+        };
+    }
+    
+    // 检查更新
+    if (checkBtn) {
+        checkBtn.addEventListener('click', debounce(function() {
+            var now = Date.now();
+            if (now - lastClickTime < 2000) {
+                return; // 2秒内不允许重复点击
+            }
+            lastClickTime = now;
+            
+            checkBtn.disabled = true;
+            checkBtn.textContent = '检查中...';
+            statusSpan.innerHTML = '<span class="loading-spinner"></span>';
+            
+            fetch('{$updateUrl}?do=update&action=check&force=1')
+                .then(function(response) { return response.json(); })
+                .then(function(data) {
+                    statusSpan.textContent = '检查完成';
+                    setTimeout(function() {
+                        location.reload();
+                    }, 1000);
+                })
+                .catch(function(error) {
+                    statusSpan.textContent = '检查失败: ' + error.message;
+                    checkBtn.disabled = false;
+                    checkBtn.textContent = '检查更新';
+                });
+        }, 300));
+    }
+    
+    // 立即更新
+    if (performBtn) {
+        performBtn.addEventListener('click', function() {
+            if (!confirm('确定要更新插件吗？\\n\\n更新过程中会自动备份当前版本，如果更新失败会自动恢复。\\n建议在更新前手动备份重要数据。')) {
                 return;
             }
-        } catch (Exception $e) {
-            // 插件配置不存在时（首次激活），默认启用自动更新
-        }
-        
-        // 检查更新
-        $updateInfo = self::checkUpdate();
-        
-        echo '<div class="dplayermax-update-section" style="margin-top: 20px; padding: 15px; background: #f9f9f9; border: 1px solid #ddd; border-radius: 4px;">';
-        echo '<h3 style="margin-top: 0;">插件更新</h3>';
-        
-        if ($updateInfo['error']) {
-            echo '<p style="color: #d9534f;">' . htmlspecialchars($updateInfo['message']) . '</p>';
-        } else {
-            echo '<p><strong>当前版本:</strong> ' . htmlspecialchars($updateInfo['localVersion']) . '</p>';
             
-            if ($updateInfo['remoteVersion']) {
-                echo '<p><strong>最新版本:</strong> ' . htmlspecialchars($updateInfo['remoteVersion']) . '</p>';
-            }
+            performBtn.disabled = true;
+            performBtn.textContent = '更新中...';
+            statusSpan.innerHTML = '<span class="loading-spinner"></span> 正在下载更新包...';
             
-            echo '<p>' . htmlspecialchars($updateInfo['message']) . '</p>';
-            
-            if ($updateInfo['hasUpdate']) {
-                echo '<button type="button" id="dplayermax-update-btn" class="btn primary" style="margin-top: 10px;">立即更新</button>';
-                echo '<span id="dplayermax-update-status" style="margin-left: 10px;"></span>';
-            }
-        }
-        
-        echo '</div>';
+            fetch('{$updateUrl}?do=update&action=perform')
+                .then(function(response) { return response.json(); })
+                .then(function(data) {
+                    if (data.success) {
+                        statusSpan.textContent = '✓ ' + data.message;
+                        setTimeout(function() {
+                            location.reload();
+                        }, 2000);
+                    } else {
+                        statusSpan.textContent = '✗ ' + data.message;
+                        performBtn.disabled = false;
+                        performBtn.textContent = '立即更新';
+                    }
+                })
+                .catch(function(error) {
+                    statusSpan.textContent = '✗ 更新失败: ' + error.message;
+                    performBtn.disabled = false;
+                    performBtn.textContent = '立即更新';
+                });
+        });
+    }
+})();
+</script>
+JS;
     }
 
     /**
@@ -899,5 +1430,60 @@ EOF;
         }
         
         return true;
+    }
+}
+
+/**
+ * DPlayerMAX Action处理类
+ * 处理AJAX更新请求
+ */
+class DPlayerMAX_Action extends Typecho_Widget implements Widget_Interface_Do
+{
+    /**
+     * 执行动作
+     */
+    public function action()
+    {
+        $this->widget('Widget_User')->pass('administrator');
+        $this->on($this->request->is('do=update'))->update();
+    }
+
+    /**
+     * 处理更新请求
+     */
+    public function update()
+    {
+        // 验证用户权限
+        $user = $this->widget('Widget_User');
+        if (!$user->pass('administrator', true)) {
+            $this->response->throwJson([
+                'success' => false,
+                'message' => '权限不足',
+                'error' => '只有管理员可以执行更新操作'
+            ]);
+        }
+
+        $action = $this->request->get('action', 'check');
+
+        if ($action === 'check') {
+            // 检查更新，支持强制刷新
+            $forceRefresh = $this->request->get('force', '0') == '1';
+            $result = DPlayerMAX_Plugin::checkUpdate($forceRefresh);
+            $this->response->throwJson($result);
+        } elseif ($action === 'status') {
+            // 获取更新状态（不强制刷新）
+            $result = DPlayerMAX_Plugin::checkUpdate(false);
+            $this->response->throwJson($result);
+        } elseif ($action === 'perform') {
+            // 执行更新
+            $result = DPlayerMAX_Plugin::performUpdate();
+            $this->response->throwJson($result);
+        } else {
+            $this->response->throwJson([
+                'success' => false,
+                'message' => '无效的操作',
+                'error' => '不支持的action参数'
+            ]);
+        }
     }
 }
