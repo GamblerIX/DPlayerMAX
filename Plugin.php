@@ -14,15 +14,17 @@ class DPlayerMAX_Plugin implements Typecho_Plugin_Interface
 
     public static function activate()
     {
-        Typecho_Plugin::factory('Widget_Abstract_Contents')->contentEx = ['DPlayerMAX_Plugin', 'replacePlayer'];
-        Typecho_Plugin::factory('Widget_Abstract_Contents')->excerptEx = ['DPlayerMAX_Plugin', 'replacePlayer'];
-        Typecho_Plugin::factory('Widget_Archive')->header = ['DPlayerMAX_Plugin', 'playerHeader'];
-        Typecho_Plugin::factory('Widget_Archive')->footer = ['DPlayerMAX_Plugin', 'playerFooter'];
-        Typecho_Plugin::factory('admin/write-post.php')->bottom = ['DPlayerMAX_Plugin', 'addEditorButton'];
-        Typecho_Plugin::factory('admin/write-page.php')->bottom = ['DPlayerMAX_Plugin', 'addEditorButton'];
+        Typecho_Plugin::factory('Widget_Abstract_Contents')->contentEx = array('DPlayerMAX_Plugin', 'replacePlayer');
+        Typecho_Plugin::factory('Widget_Abstract_Contents')->excerptEx = array('DPlayerMAX_Plugin', 'replacePlayer');
+        Typecho_Plugin::factory('Widget_Archive')->header = array('DPlayerMAX_Plugin', 'playerHeader');
+        Typecho_Plugin::factory('Widget_Archive')->footer = array('DPlayerMAX_Plugin', 'playerFooter');
+        Typecho_Plugin::factory('admin/write-post.php')->bottom = array('DPlayerMAX_Plugin', 'addEditorButton');
+        Typecho_Plugin::factory('admin/write-page.php')->bottom = array('DPlayerMAX_Plugin', 'addEditorButton');
         
         // 注册更新路由
         Helper::addRoute('dplayermax_update', '/dplayermax/update', 'DPlayerMAX_Action', 'action');
+        
+        return _t('插件已激活，请进入设置页面进行配置');
     }
 
     public static function deactivate()
@@ -131,15 +133,41 @@ EOF;
     public static function config(Typecho_Widget_Helper_Form $form)
     {
         $theme = new Typecho_Widget_Helper_Form_Element_Text(
-            'theme', null, '#FADFA3',
-            _t('默认主题颜色'), _t('播放器默认的主题颜色，例如 #372e21、#75c、red、blue，该设定会被[dplayer]标签中的theme属性覆盖，默认为 #FADFA3'));
-        $api = new Typecho_Widget_Helper_Form_Element_Text(
-            'api', null, '',
-            _t('弹幕服务器地址'), _t('用于保存视频弹幕，例如 https://api.prprpr.me/dplayer/v3/'));
-        $hls = new Typecho_Widget_Helper_Form_Element_Radio('hls', array('0' => _t('不开启HLS支持'), '1' => _t('开启HLS支持')), '0', _t('HLS支持'), _t("开启后可解析 m3u8 格式视频"));
-        $flv = new Typecho_Widget_Helper_Form_Element_Radio('flv', array('0' => _t('不开启FLV支持'), '1' => _t('开启FLV支持')), '0', _t('FLV支持'), _t("开启后可解析 flv 格式视频"));
+            'theme', 
+            null, 
+            '#FADFA3',
+            _t('默认主题颜色'), 
+            _t('播放器默认的主题颜色，例如 #372e21、#75c、red、blue，该设定会被[dplayer]标签中的theme属性覆盖，默认为 #FADFA3')
+        );
+        $form->addInput($theme);
         
-        // 添加自动更新配置
+        $api = new Typecho_Widget_Helper_Form_Element_Text(
+            'api', 
+            null, 
+            '',
+            _t('弹幕服务器地址'), 
+            _t('用于保存视频弹幕，例如 https://api.prprpr.me/dplayer/v3/')
+        );
+        $form->addInput($api);
+        
+        $hls = new Typecho_Widget_Helper_Form_Element_Radio(
+            'hls', 
+            array('0' => _t('不开启HLS支持'), '1' => _t('开启HLS支持')), 
+            '0', 
+            _t('HLS支持'), 
+            _t("开启后可解析 m3u8 格式视频")
+        );
+        $form->addInput($hls);
+        
+        $flv = new Typecho_Widget_Helper_Form_Element_Radio(
+            'flv', 
+            array('0' => _t('不开启FLV支持'), '1' => _t('开启FLV支持')), 
+            '0', 
+            _t('FLV支持'), 
+            _t("开启后可解析 flv 格式视频")
+        );
+        $form->addInput($flv);
+        
         $autoUpdate = new Typecho_Widget_Helper_Form_Element_Radio(
             'autoUpdate',
             array('0' => _t('禁用'), '1' => _t('启用')),
@@ -147,19 +175,7 @@ EOF;
             _t('自动检查更新'),
             _t('启用后将在访问配置页面时自动检查GitHub上的新版本')
         );
-        
-        $form->addInput($theme);
-        $form->addInput($api);
-        $form->addInput($hls);
-        $form->addInput($flv);
         $form->addInput($autoUpdate);
-        
-        // 显示更新信息
-        self::renderUpdateSection();
-        
-        // 引入更新JavaScript
-        $updateJs = Helper::options()->pluginUrl . '/DPlayerMAX/assets/update.js';
-        echo "<script type=\"text/javascript\" src=\"{$updateJs}\"></script>";
     }
 
     public static function personalConfig(Typecho_Widget_Helper_Form $form)
@@ -774,9 +790,13 @@ EOF;
     private static function renderUpdateSection()
     {
         // 检查是否启用自动更新
-        $options = Helper::options()->plugin('DPlayerMAX');
-        if (isset($options->autoUpdate) && $options->autoUpdate == '0') {
-            return;
+        try {
+            $options = Helper::options()->plugin('DPlayerMAX');
+            if (isset($options->autoUpdate) && $options->autoUpdate == '0') {
+                return;
+            }
+        } catch (Exception $e) {
+            // 插件配置不存在时（首次激活），默认启用自动更新
         }
         
         // 检查更新
