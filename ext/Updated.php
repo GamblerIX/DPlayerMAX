@@ -7,44 +7,149 @@
  *
  * @package DPlayerMAX
  * @author GamblerIX
- * @version 1.0.0
+ * @version 1.1.4
  * @link https://github.com/GamblerIX/DPlayerMAX
  */
 
 // 处理 HTTP 请求（当直接访问此文件时）
 if (isset($_GET['action']) && !defined('__TYPECHO_ROOT_DIR__')) {
-    // 关闭错误显示，防止 HTML 错误信息
-    ini_set('display_errors', 0);
-    error_reporting(0);
+    // 调试模式：添加 &debug=1 参数启用
+    $debugMode = isset($_GET['debug']) && $_GET['debug'] == '1';
     
-    // 设置响应头
-    header('Content-Type: application/json; charset=utf-8');
+    if ($debugMode) {
+        // 调试模式：显示所有错误
+        ini_set('display_errors', 1);
+        error_reporting(E_ALL);
+        header('Content-Type: text/html; charset=utf-8');
+        echo "<h2>DPlayerMAX 更新调试模式</h2>";
+        echo "<p>当前文件: " . __FILE__ . "</p>";
+    } else {
+        // 正常模式：关闭错误显示
+        ini_set('display_errors', 0);
+        error_reporting(0);
+        header('Content-Type: application/json; charset=utf-8');
+    }
     
     try {
-        // 定义 Typecho 根目录
-        define('__TYPECHO_ROOT_DIR__', dirname(dirname(dirname(dirname(__FILE__)))));
+        // 尝试不同的路径层级找到 Typecho 根目录
+        $possibleRoots = [
+            dirname(dirname(dirname(dirname(__FILE__)))),  // 4层: ext -> DPlayerMAX -> plugins -> usr -> root
+            dirname(dirname(dirname(__FILE__))),           // 3层: ext -> DPlayerMAX -> plugins -> root
+            dirname(dirname(dirname(dirname(dirname(__FILE__))))), // 5层
+        ];
         
-        // 检查 config.inc.php 是否存在
-        $configFile = __TYPECHO_ROOT_DIR__ . '/config.inc.php';
-        if (!file_exists($configFile)) {
+        $foundRoot = null;
+        foreach ($possibleRoots as $testRoot) {
+            if ($debugMode) {
+                echo "<p>测试路径: $testRoot</p>";
+            }
+            if (file_exists($testRoot . '/config.inc.php')) {
+                $foundRoot = $testRoot;
+                if ($debugMode) {
+                    echo "<p style='color:green;'><b>✓ 找到配置文件: {$testRoot}/config.inc.php</b></p>";
+                }
+                break;
+            }
+        }
+        
+        if (!$foundRoot) {
+            if ($debugMode) {
+                echo "<p style='color:red;'><b>✗ 无法找到 Typecho 配置文件</b></p>";
+                echo "<p>尝试的路径:</p><ul>";
+                foreach ($possibleRoots as $path) {
+                    echo "<li>$path/config.inc.php</li>";
+                }
+                echo "</ul>";
+                exit;
+            }
             echo json_encode([
                 'success' => false,
-                'message' => '无法找到 Typecho 配置文件'
+                'message' => '无法找到 Typecho 配置文件，请检查插件安装路径'
             ], JSON_UNESCAPED_UNICODE);
             exit;
+        }
+        
+        // 定义 Typecho 根目录
+        define('__TYPECHO_ROOT_DIR__', $foundRoot);
+        $configFile = __TYPECHO_ROOT_DIR__ . '/config.inc.php';
+        
+        if ($debugMode) {
+            echo "<p>加载配置文件: $configFile</p>";
         }
         
         // 加载 Typecho
         require_once $configFile;
         
-        // 验证用户权限
+        if ($debugMode) {
+            echo "<p style='color:green;'>✓ Typecho 加载成功</p>";
+        }
+        
+        // 验证用户权限 - 使用 Cookie 验证
         if (session_status() == PHP_SESSION_NONE) {
-            session_start();
+            @session_start();
+        }
+        
+        if ($debugMode) {
+            echo "<p>Session 已启动</p>";
+            echo "<p>Session ID: " . session_id() . "</p>";
+            echo "<p>Cookies: <pre>" . print_r($_COOKIE, true) . "</pre></p>";
+        }
+        
+        // 初始化数据库连接
+        $db = Typecho_Db::get();
+        
+        // 获取 Cookie 前缀
+        $cookiePrefix = Typecho_Cookie::getPrefix();
+        
+        if ($debugMode) {
+            echo "<p>Cookie 前缀: " . htmlspecialchars($cookiePrefix) . "</p>";
         }
         
         $user = Typecho_Widget::widget('Widget_User');
         
+        if ($debugMode) {
+            echo "<p>用户登录状态: " . ($user->hasLogin() ? '已登录' : '未登录') . "</p>";
+            if ($user->hasLogin()) {
+                echo "<p>用户名: {$user->name}</p>";
+                echo "<p>用户组: {$user->group}</p>";
+                echo "<p>是否管理员: " . ($user->pass('administrator', true) ? '是' : '否') . "</p>";
+            } else {
+                // 尝试手动验证 Cookie
+                echo "<p>尝试手动验证 Cookie...</p>";
+                $uidCookie = $cookiePrefix . '__typecho_uid';
+                $authCookie = $cookiePrefix . '__typecho_authCode';
+                
+                if (isset($_COOKIE[$uidCookie])) {
+                    echo "<p>找到 UID Cookie: " . $_COOKIE[$uidCookie] . "</p>";
+                    
+                    // 尝试手动登录
+                    $uid = intval($_COOKIE[$uidCookie]);
+                    if ($uid > 0) {
+                        try {
+                            $user = $db->fetchRow($db->select()->from('table.users')->where('uid = ?', $uid));
+                            if ($user && $user['group'] == 'administrator') {
+                                echo "<p style='color:green;'><b>✓ 通过 Cookie 验证为管理员</b></p>";
+                                echo "<p>用户名: {$user['name']}</p>";
+                                // 跳过权限检查，直接执行操作
+                                goto skip_permission_check;
+                            }
+                        } catch (Exception $e) {
+                            echo "<p>手动验证失败: " . $e->getMessage() . "</p>";
+                        }
+                    }
+                }
+                if (isset($_COOKIE[$authCookie])) {
+                    echo "<p>找到 AuthCode Cookie</p>";
+                }
+            }
+        }
+        
         if (!$user->hasLogin() || !$user->pass('administrator', true)) {
+            if ($debugMode) {
+                echo "<p style='color:red;'><b>✗ 权限不足</b></p>";
+                echo "<p>提示：直接访问此文件时，Typecho 的 Session 可能无法正确识别。请使用插件设置页面的按钮进行操作。</p>";
+                exit;
+            }
             echo json_encode([
                 'success' => false,
                 'message' => '权限不足，只有管理员可以执行更新操作'
@@ -52,8 +157,15 @@ if (isset($_GET['action']) && !defined('__TYPECHO_ROOT_DIR__')) {
             exit;
         }
         
+        skip_permission_check:
+        
         // 获取操作类型
         $action = $_GET['action'];
+        
+        if ($debugMode) {
+            echo "<p>执行操作: $action</p>";
+            echo "<hr>";
+        }
         
         if ($action === 'check') {
             $result = DPlayerMAX_UpdateManager::checkUpdate();
@@ -66,21 +178,41 @@ if (isset($_GET['action']) && !defined('__TYPECHO_ROOT_DIR__')) {
             ];
         }
         
-        echo json_encode($result, JSON_UNESCAPED_UNICODE);
+        if ($debugMode) {
+            echo "<h3>结果:</h3>";
+            echo "<pre>";
+            print_r($result);
+            echo "</pre>";
+        } else {
+            echo json_encode($result, JSON_UNESCAPED_UNICODE);
+        }
         
     } catch (Exception $e) {
-        echo json_encode([
-            'success' => false,
-            'message' => '操作失败: ' . $e->getMessage(),
-            'trace' => $e->getTraceAsString()
-        ], JSON_UNESCAPED_UNICODE);
+        if ($debugMode) {
+            echo "<h3 style='color:red;'>异常错误:</h3>";
+            echo "<p><b>消息:</b> " . $e->getMessage() . "</p>";
+            echo "<p><b>文件:</b> " . $e->getFile() . "</p>";
+            echo "<p><b>行号:</b> " . $e->getLine() . "</p>";
+            echo "<pre>" . $e->getTraceAsString() . "</pre>";
+        } else {
+            echo json_encode([
+                'success' => false,
+                'message' => '操作失败: ' . $e->getMessage()
+            ], JSON_UNESCAPED_UNICODE);
+        }
     } catch (Error $e) {
-        echo json_encode([
-            'success' => false,
-            'message' => 'PHP 错误: ' . $e->getMessage(),
-            'file' => $e->getFile(),
-            'line' => $e->getLine()
-        ], JSON_UNESCAPED_UNICODE);
+        if ($debugMode) {
+            echo "<h3 style='color:red;'>PHP 错误:</h3>";
+            echo "<p><b>消息:</b> " . $e->getMessage() . "</p>";
+            echo "<p><b>文件:</b> " . $e->getFile() . "</p>";
+            echo "<p><b>行号:</b> " . $e->getLine() . "</p>";
+            echo "<pre>" . $e->getTraceAsString() . "</pre>";
+        } else {
+            echo json_encode([
+                'success' => false,
+                'message' => 'PHP 错误: ' . $e->getMessage()
+            ], JSON_UNESCAPED_UNICODE);
+        }
     }
     exit;
 }
@@ -104,22 +236,22 @@ class DPlayerMAX_UpdateManager
     /**
      * 获取本地版本号
      * 
-     * @return string 返回本地版本号
+     * @return string 返回本地版本号，如果出错返回 ERROR: 开头的错误信息
      */
     public static function getLocalVersion()
     {
         $versionFile = dirname(__DIR__) . '/VERSION';
         
-        // 如果VERSION文件不存在，返回默认版本号
+        // 如果VERSION文件不存在，返回错误提示
         if (!file_exists($versionFile)) {
-            return '1.1.3';
+            return 'ERROR: VERSION文件不存在，请重新下载插件';
         }
         
         // 读取VERSION文件
         $version = @file_get_contents($versionFile);
         
         if ($version === false) {
-            return '1.1.3';
+            return 'ERROR: 无法读取VERSION文件';
         }
         
         // 返回trim后的版本号
@@ -135,6 +267,17 @@ class DPlayerMAX_UpdateManager
     {
         // 获取本地版本
         $localVersion = self::getLocalVersion();
+        
+        // 检查是否有错误
+        if (strpos($localVersion, 'ERROR:') === 0) {
+            return [
+                'success' => false,
+                'localVersion' => $localVersion,
+                'remoteVersion' => null,
+                'hasUpdate' => false,
+                'message' => substr($localVersion, 7) // 移除 "ERROR: " 前缀
+            ];
+        }
 
         // 获取远程版本
         $apiResult = self::fetchRemoteVersion();

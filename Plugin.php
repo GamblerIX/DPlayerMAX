@@ -6,11 +6,24 @@ if (!defined('__TYPECHO_ROOT_DIR__')) exit;
  *
  * @package DPlayerMAX
  * @author GamblerIX
- * @version 1.1.3
+ * @version 1.1.4
  * @link https://github.com/GamblerIX/DPlayerMAX
  */
 class DPlayerMAX_Plugin implements Typecho_Plugin_Interface
 {
+    /**
+     * 静态初始化 - 在类加载时立即执行
+     */
+    public static function init()
+    {
+        // 检查是否是 AJAX 更新请求
+        if (isset($_POST['dplayermax_action']) && 
+            isset($_GET['config']) && 
+            strpos($_SERVER['REQUEST_URI'], 'DPlayerMAX') !== false) {
+            self::handleAjaxRequest();
+        }
+    }
+    
     public static function activate()
     {
         Typecho_Plugin::factory('Widget_Abstract_Contents')->contentEx = array('DPlayerMAX_Plugin', 'replacePlayer');
@@ -128,6 +141,12 @@ EOF;
 
     public static function config(Typecho_Widget_Helper_Form $form)
     {
+        // 必须在最开始处理 AJAX 请求，在任何输出之前
+        if (isset($_POST['dplayermax_action'])) {
+            self::handleAjaxRequest();
+            // handleAjaxRequest 会调用 exit，不会执行到这里
+        }
+        
         $theme = new Typecho_Widget_Helper_Form_Element_Text(
             'theme', 
             null, 
@@ -242,6 +261,56 @@ EOF;
 
 
     /**
+     * 处理 AJAX 请求
+     */
+    private static function handleAjaxRequest()
+    {
+        // 清除之前可能的输出缓冲
+        while (ob_get_level()) {
+            ob_end_clean();
+        }
+        
+        // 设置响应头
+        header('Content-Type: application/json; charset=utf-8');
+        header('Cache-Control: no-cache, must-revalidate');
+        
+        // 验证权限
+        $user = Typecho_Widget::widget('Widget_User');
+        
+        if (!$user->hasLogin() || !$user->pass('administrator', true)) {
+            echo json_encode([
+                'success' => false,
+                'message' => '权限不足'
+            ], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+        
+        $action = $_POST['dplayermax_action'];
+        
+        try {
+            if ($action === 'check') {
+                $result = self::checkUpdate();
+            } elseif ($action === 'perform') {
+                $result = self::performUpdate();
+            } else {
+                $result = [
+                    'success' => false,
+                    'message' => '无效的操作'
+                ];
+            }
+            
+            echo json_encode($result, JSON_UNESCAPED_UNICODE);
+        } catch (Exception $e) {
+            echo json_encode([
+                'success' => false,
+                'message' => '错误: ' . $e->getMessage()
+            ], JSON_UNESCAPED_UNICODE);
+        }
+        
+        exit;
+    }
+
+    /**
      * 检查更新（代理方法）
      * 
      * @return array 返回更新状态信息
@@ -259,7 +328,7 @@ EOF;
             if (!file_exists($updatedFile)) {
                 return [
                     'success' => false,
-                    'localVersion' => '1.1.3',
+                    'localVersion' => '1.1.4',
                     'remoteVersion' => null,
                     'hasUpdate' => false,
                     'message' => '更新组件不存在，请重新安装插件'
@@ -271,7 +340,7 @@ EOF;
             if (!class_exists('DPlayerMAX_UpdateManager')) {
                 return [
                     'success' => false,
-                    'localVersion' => '1.1.3',
+                    'localVersion' => '1.1.4',
                     'remoteVersion' => null,
                     'hasUpdate' => false,
                     'message' => '更新管理器类不存在'
@@ -284,7 +353,7 @@ EOF;
             self::logError('检查更新失败: ' . $e->getMessage(), 'CHECK_UPDATE');
             return [
                 'success' => false,
-                'localVersion' => '1.1.3',
+                'localVersion' => '1.1.4',
                 'remoteVersion' => null,
                 'hasUpdate' => false,
                 'message' => '检查更新时发生错误: ' . $e->getMessage()
@@ -343,7 +412,7 @@ EOF;
         // 设置初始状态（不执行实际的更新检查）
         $updateInfo = [
             'success' => true,
-            'localVersion' => '1.1.3',
+            'localVersion' => '1.1.4',
             'remoteVersion' => null,
             'hasUpdate' => false,
             'message' => '点击"检查更新"按钮来检查新版本'
@@ -361,8 +430,15 @@ EOF;
         $html .= '<h3>插件更新状态' . self::renderStatusLight($status) . '</h3>';
         $html .= '</div>';
         
-        // 渲染版本信息
-        $html .= self::renderVersionInfo($updateInfo);
+        // 检查版本号是否有错误
+        if (strpos($updateInfo['localVersion'], 'ERROR:') === 0) {
+            $html .= '<div class="version-info" style="color: red;">';
+            $html .= '<p><strong>⚠ ' . htmlspecialchars(substr($updateInfo['localVersion'], 7)) . '</strong></p>';
+            $html .= '</div>';
+        } else {
+            // 渲染版本信息
+            $html .= self::renderVersionInfo($updateInfo);
+        }
         
         // 渲染状态消息
         $html .= '<div class="update-status">';
@@ -372,13 +448,8 @@ EOF;
         // 渲染操作按钮
         $html .= '<div class="update-actions">';
         $html .= '<button type="button" id="dplayermax-check-update-btn" class="btn">检查更新</button>';
-        
-        if (isset($updateInfo['hasUpdate']) && $updateInfo['hasUpdate']) {
-            $html .= '<button type="button" id="dplayermax-perform-update-btn" class="btn primary">立即更新</button>';
-            $releaseUrl = 'https://github.com/GamblerIX/DPlayerMAX/releases';
-            $html .= '<a href="' . $releaseUrl . '" target="_blank" class="btn">查看更新日志</a>';
-        }
-        
+        $html .= '<button type="button" id="dplayermax-perform-update-btn" class="btn primary" style="display:none;">立即更新</button>';
+        $html .= '<a id="dplayermax-release-link" href="https://github.com/GamblerIX/DPlayerMAX/tree/main/Changelog" target="_blank" class="btn" style="display:none;">查看更新日志</a>';
         $html .= '<span id="dplayermax-update-status" style="margin-left: 10px;"></span>';
         $html .= '</div>';
         
@@ -438,133 +509,8 @@ EOF;
      */
     private static function renderStyles()
     {
-        return <<<CSS
-<style>
-.dplayermax-update-widget {
-    margin-top: 20px;
-    padding: 20px;
-    background: #fff;
-    border: 1px solid #e1e8ed;
-    border-radius: 4px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-}
-
-.dplayermax-update-widget .update-header {
-    margin-bottom: 15px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid #e1e8ed;
-}
-
-.dplayermax-update-widget .update-header h3 {
-    margin: 0;
-    font-size: 16px;
-    font-weight: 600;
-    display: inline-block;
-}
-
-.dplayermax-status-light {
-    display: inline-block;
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-    margin-left: 10px;
-    box-shadow: 0 0 5px rgba(0,0,0,0.2);
-    vertical-align: middle;
-}
-
-.dplayermax-status-light.status-not-checked {
-    background-color: #6c757d;
-    box-shadow: 0 0 5px rgba(108, 117, 125, 0.4);
-}
-
-.dplayermax-status-light.status-disabled {
-    background-color: #dc3545;
-    box-shadow: 0 0 8px rgba(220, 53, 69, 0.6);
-}
-
-.dplayermax-status-light.status-up-to-date {
-    background-color: #28a745;
-    box-shadow: 0 0 8px rgba(40, 167, 69, 0.6);
-}
-
-.dplayermax-status-light.status-update-available {
-    background-color: #ffc107;
-    box-shadow: 0 0 8px rgba(255, 193, 7, 0.6);
-    animation: dplayermax-pulse 2s infinite;
-}
-
-.dplayermax-status-light.status-error {
-    background-color: #6c757d;
-    box-shadow: 0 0 5px rgba(108, 117, 125, 0.4);
-}
-
-@keyframes dplayermax-pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
-}
-
-.dplayermax-update-widget .version-info {
-    margin: 15px 0;
-}
-
-.dplayermax-update-widget .version-info p {
-    margin: 5px 0;
-    font-size: 14px;
-}
-
-.dplayermax-update-widget .update-status {
-    margin: 15px 0;
-}
-
-.dplayermax-update-widget .status-message {
-    font-size: 14px;
-    margin: 5px 0;
-}
-
-.dplayermax-update-widget .last-check-time {
-    font-size: 12px;
-    color: #6c757d;
-    margin: 5px 0;
-}
-
-.dplayermax-update-widget .update-actions {
-    margin-top: 15px;
-}
-
-.dplayermax-update-widget .update-actions .btn {
-    margin-right: 10px;
-}
-
-.dplayermax-update-widget .loading-spinner {
-    display: inline-block;
-    width: 16px;
-    height: 16px;
-    border: 2px solid #f3f3f3;
-    border-top: 2px solid #3498db;
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-    vertical-align: middle;
-}
-
-@keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-}
-
-@media (max-width: 768px) {
-    .dplayermax-status-light {
-        width: 16px;
-        height: 16px;
-    }
-    
-    .dplayermax-update-widget .update-actions .btn {
-        display: block;
-        margin: 5px 0;
-        width: 100%;
-    }
-}
-</style>
-CSS;
+        $cssUrl = Helper::options()->pluginUrl . '/DPlayerMAX/plugin/update-widget.css';
+        return '<link rel="stylesheet" type="text/css" href="' . $cssUrl . '" />';
     }
 
     /**
@@ -573,15 +519,35 @@ CSS;
      */
     private static function renderJavaScript()
     {
-        $updateUrl = Helper::options()->pluginUrl . '/DPlayerMAX/ext/Updated.php';
-        
         return <<<JS
 <script>
 (function() {
     var checkBtn = document.getElementById('dplayermax-check-update-btn');
     var performBtn = document.getElementById('dplayermax-perform-update-btn');
+    var releaseLink = document.getElementById('dplayermax-release-link');
     var statusSpan = document.getElementById('dplayermax-update-status');
+    var statusLight = document.querySelector('.dplayermax-status-light');
     var lastClickTime = 0;
+    
+    // 更新状态指示灯
+    function updateStatusLight(status) {
+        if (!statusLight) return;
+        
+        // 移除所有状态类
+        statusLight.className = 'dplayermax-status-light';
+        
+        // 添加新状态类
+        statusLight.classList.add('status-' + status);
+        
+        // 更新 title
+        var titles = {
+            'not-checked': '还没有检查更新',
+            'up-to-date': '已是最新版本',
+            'update-available': '有新版本可用',
+            'error': '检查更新时出错'
+        };
+        statusLight.title = titles[status] || '未知状态';
+    }
     
     // 防抖处理
     function debounce(func, wait) {
@@ -608,7 +574,14 @@ CSS;
             checkBtn.textContent = '检查中...';
             statusSpan.innerHTML = '<span class="loading-spinner"></span>';
             
-            fetch('{$updateUrl}?action=check')
+            // 使用 POST 请求到当前页面
+            var formData = new FormData();
+            formData.append('dplayermax_action', 'check');
+            
+            fetch(window.location.href, {
+                method: 'POST',
+                body: formData
+            })
                 .then(function(response) {
                     // 检查响应状态
                     if (!response.ok) {
@@ -624,13 +597,39 @@ CSS;
                     return response.json();
                 })
                 .then(function(data) {
+                    checkBtn.disabled = false;
+                    checkBtn.textContent = '检查更新';
+                    
                     if (data.success === false) {
-                        statusSpan.textContent = '✗ ' + data.message;
+                        statusSpan.innerHTML = '<span style="color:red;">✗ ' + data.message + '</span>';
+                        updateStatusLight('error');
                     } else {
-                        statusSpan.textContent = '✓ 检查完成';
-                        setTimeout(function() {
-                            location.reload();
-                        }, 1000);
+                        var message = data.message || '检查完成';
+                        if (data.hasUpdate) {
+                            // 有新版本可用
+                            statusSpan.innerHTML = '<span style="color:orange;">⚠ ' + message + '</span>';
+                            updateStatusLight('update-available');
+                            
+                            // 显示更新按钮和查看日志链接
+                            if (performBtn) {
+                                performBtn.style.display = 'inline-block';
+                            }
+                            if (releaseLink) {
+                                releaseLink.style.display = 'inline-block';
+                            }
+                        } else {
+                            // 已是最新版本
+                            statusSpan.innerHTML = '<span style="color:green;">✓ ' + message + '</span>';
+                            updateStatusLight('up-to-date');
+                            
+                            // 隐藏更新按钮
+                            if (performBtn) {
+                                performBtn.style.display = 'none';
+                            }
+                            if (releaseLink) {
+                                releaseLink.style.display = 'none';
+                            }
+                        }
                     }
                 })
                 .catch(function(error) {
@@ -653,7 +652,14 @@ CSS;
             performBtn.textContent = '更新中...';
             statusSpan.innerHTML = '<span class="loading-spinner"></span> 正在下载更新包...';
             
-            fetch('{$updateUrl}?action=perform')
+            // 使用 POST 请求到当前页面
+            var formData = new FormData();
+            formData.append('dplayermax_action', 'perform');
+            
+            fetch(window.location.href, {
+                method: 'POST',
+                body: formData
+            })
                 .then(function(response) {
                     // 检查响应状态
                     if (!response.ok) {
@@ -688,6 +694,7 @@ CSS;
                 });
         });
     }
+    
 })();
 </script>
 JS;
@@ -771,3 +778,7 @@ JS;
 }
 
 
+
+
+// 初始化插件，处理 AJAX 请求
+DPlayerMAX_Plugin::init();
