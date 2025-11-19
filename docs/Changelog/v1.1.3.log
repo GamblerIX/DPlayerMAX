@@ -1,6 +1,6 @@
 # DPlayerMAX v1.1.3 更新日志
 
-发布日期: 2024-11-19
+发布日期: 2025-11-19
 
 ## 新增功能
 
@@ -8,77 +8,161 @@
 - ✨ 新增插件自动更新功能，支持从GitHub仓库自动检测和下载更新
 - 🔍 版本检查：自动对比本地版本与GitHub远程版本
 - 📥 一键更新：在插件配置页面点击按钮即可完成更新
-- 🔄 智能备份：更新前自动备份当前版本，失败时自动恢复
+- 💡 状态指示灯：实时显示更新状态（未检查/最新/有更新/错误）
 - 🛡️ 安全验证：包含权限检查、路径验证和来源验证
 - 📊 状态反馈：实时显示更新进度和状态信息
 - ⚙️ 可配置：支持启用/禁用自动更新检查
 
 ## 技术改进
 
-### 版本检查模块
-- 实现 `getRemoteVersion()` 方法：从GitHub获取远程VERSION文件
-- 实现 `getLocalVersion()` 方法：读取本地VERSION文件
-- 实现 `compareVersion()` 方法：使用语义化版本号比较
-- 实现 `checkUpdate()` 方法：返回完整的更新信息
+### DPlayerMAX_UpdateManager 类 (ext/Updated.php)
 
-### 更新执行模块
-- 实现 `downloadUpdate()` 方法：从GitHub下载更新包
-- 实现 `extractUpdate()` 方法：解压ZIP文件
-- 实现 `installUpdate()` 方法：安装更新文件
-- 实现 `performUpdate()` 方法：协调完整更新流程
+#### 版本检查模块
+- `getLocalVersion()`: 从 VERSION 文件读取本地版本号
+- `fetchRemoteVersion()`: 从 GitHub 获取远程版本号，包含完整错误处理
+- `compareVersion()`: 使用 PHP version_compare 进行语义化版本比较
+- `checkUpdate()`: 返回完整的更新状态信息（版本号、是否有更新、消息）
+- `getFriendlyErrorMessage()`: 提供用户友好的中文错误提示
 
-### 备份恢复模块
-- 实现 `backupPlugin()` 方法：创建带时间戳的备份
-- 实现 `restorePlugin()` 方法：从备份恢复插件
-- 实现 `cleanupBackup()` 方法：清理临时文件
-- 实现 `recursiveCopy()` 辅助方法：递归复制文件
+#### 更新执行模块
+- `downloadUpdate()`: 从 GitHub 下载 main.zip，设置 10 秒超时
+- `extractUpdate()`: 使用 ZipArchive 解压更新包到临时目录
+- `installUpdate()`: 将 DPlayerMAX-main 目录下的文件复制到插件目录
+- `performUpdate()`: 协调完整更新流程（下载→解压→安装→验证→清理）
 
-### 安全增强
-- 实现 `checkPermission()` 方法：验证管理员权限
-- 实现 `validatePath()` 方法：防止路径遍历攻击
-- 实现 `validateDownloadUrl()` 方法：验证下载来源
-- 添加 `logError()` 方法：记录详细错误日志
+#### 文件保护机制
+- `shouldSkipFile()`: 判断文件是否应该跳过
+  - 跳过 ext/Updated.php（避免自我修改）
+  - 跳过 .git、.github、.gitignore、.gitattributes
+- `recursiveCopy()`: 递归复制文件和目录
+- `cleanupTemp()`: 递归删除临时目录
+- `verifyVersion()`: 验证更新后的版本号是否正确
 
-### 用户界面
-- 在配置页面添加自动更新开关
-- 实现 `renderUpdateSection()` 方法：显示版本信息和更新按钮
-- 创建 `assets/update.js`：处理AJAX更新请求
-- 创建 `Action.php`：处理后端更新请求
+### Plugin.php 简化
+
+#### 代理方法
+- `checkUpdate()`: 检查 ext/Updated.php 是否存在，调用 UpdateManager::checkUpdate()
+- `performUpdate()`: 检查 ext/Updated.php 是否存在，调用 UpdateManager::performUpdate()
+- 移除了所有旧的更新相关私有方法（约 500+ 行代码）
+- 移除了内存缓存机制（$memoryCache、CACHE_TTL）
+
+#### UI 组件优化
+- `renderUpdateStatusWidget()`: 简化的更新状态显示组件
+- `renderStatusLight()`: 状态指示灯（未检查/最新/有更新/错误）
+- `renderVersionInfo()`: 显示当前版本和远程版本
+- `renderStyles()`: CSS 样式（包含状态指示灯动画）
+- `renderJavaScript()`: 简化的前端交互逻辑，移除 force 参数
+
+### DPlayerMAX_Action 类简化
+- 移除 `status` 操作（不再需要）
+- 移除 `force` 参数（简化为手动触发）
+- 简化 `update()` 方法，只保留 check 和 perform 两个操作
 
 ## 错误处理
-- 网络错误：友好提示并建议检查网络连接
-- 文件系统错误：提示检查目录权限和磁盘空间
-- ZIP处理错误：自动清理损坏文件并提示重试
-- 更新失败：自动从备份恢复原版本
+
+### 用户友好的中文错误提示
+- **NETWORK**: "无法连接到 GitHub，请检查网络连接"
+- **DOWNLOAD**: "下载更新包失败，请稍后重试"
+- **EXTRACT**: "解压更新包失败，请确保服务器已安装 ZipArchive 扩展"
+- **INSTALL**: "安装更新失败，请检查文件权限"
+- **FORMAT**: "版本号格式错误"
+- **UNKNOWN**: "更新过程中发生错误，请稍后重试"
+
+### 错误恢复机制
+- 下载失败：自动清理临时文件
+- 解压失败：自动清理临时文件
+- 安装失败：自动清理临时文件
+- 版本验证失败：提示用户手动检查
+- 异常捕获：确保临时文件在任何情况下都会被清理
 
 ## 兼容性
-- PHP 5.6+ 支持
-- Typecho 1.0+ 支持
+- PHP 7.0+ 支持
+- Typecho 1.2+ 支持
 - 需要 ZipArchive 扩展
 - 需要 file_get_contents 或 cURL 支持
 
 ## 文件变更
-- 新增: `Action.php` - AJAX请求处理
-- 新增: `assets/update.js` - 前端更新交互
-- 修改: `Plugin.php` - 添加更新功能模块
-- 修改: `README.md` - 添加自动更新说明
-- 新增: `docs/Changelog/v1.1.3.log` - 本更新日志
 
-## 已知问题
+### 新增文件
+- ✨ `ext/Updated.php` - 独立的更新管理器模块（约 300 行）
+- 📁 `ext/` - 扩展目录（更新时不会被覆盖）
+
+### 修改文件
+- 🔧 `Plugin.php` - 重构更新功能，删除约 500+ 行旧代码，添加简洁的代理方法
+- 📝 `docs/Changelog/v1.1.3.log` - 本更新日志
+
+### 文件保护
+- 🔒 `ext/Updated.php` 在更新时会被跳过，不会被覆盖
+- 🔒 `.git`、`.github`、`.gitignore`、`.gitattributes` 在更新时会被跳过
+
+## 设计原则
+
+### 简洁性
+- ❌ 无复杂的缓存机制
+- ❌ 无自动备份功能（简化流程）
+- ❌ 无日志系统（减少依赖）
+- ✅ 专注于核心更新功能
+- ✅ 用户完全控制更新时机
+
+### 持久性
+- 🔒 ext/Updated.php 在更新时不会被覆盖
+- 🔒 更新逻辑与核心插件功能分离
+- 🔒 即使 Plugin.php 被更新，更新功能仍然可用
+
+### 用户友好
+- 🌏 所有错误提示都是中文
+- 🎯 清晰的状态指示灯
+- 🖱️ 简单的点击操作
+- ⚡ 手动触发，无自动检查
+
+## 已知限制
 - 更新过程中需要插件目录具有写入权限
-- 某些服务器环境可能限制外部HTTP请求
-- 大文件下载可能受到PHP超时限制影响
+- 某些服务器环境可能限制外部 HTTP 请求
+- 需要 PHP ZipArchive 扩展支持
+- 网络请求超时设置为 10 秒
 
 ## 升级说明
-从 v1.1.2 升级到 v1.1.3：
-1. 启用自动更新功能后，访问插件配置页面
-2. 系统会自动检测到新版本
-3. 点击"立即更新"按钮完成升级
-4. 或手动下载并替换插件文件
+
+### 从 v1.1.2 升级到 v1.1.3
+1. 手动下载 v1.1.3 版本并替换插件文件
+2. 访问插件配置页面，确认 ext/Updated.php 文件存在
+3. 之后的版本可以使用一键更新功能
+
+### 使用一键更新（v1.1.3+）
+1. 访问插件配置页面
+2. 点击"检查更新"按钮
+3. 如果有新版本，点击"立即更新"按钮
+4. 等待更新完成，刷新页面
+
+## 代码统计
+
+### 代码变更
+- 新增代码：约 300 行（ext/Updated.php）
+- 删除代码：约 500 行（Plugin.php 旧更新方法）
+- 净减少：约 200 行
+- 代码质量：更清晰、更模块化、更易维护
+
+### 文件大小
+- ext/Updated.php: ~10 KB
+- Plugin.php: 减少约 15 KB
+
+## 测试建议
+
+### 功能测试
+1. ✅ 检查更新功能正常
+2. ✅ 执行更新功能正常
+3. ✅ 网络错误时显示友好提示
+4. ✅ 下载失败时显示友好提示
+5. ✅ 解压失败时显示友好提示
+6. ✅ 安装失败时显示友好提示
+7. ✅ UI 状态正确显示
+8. ✅ 更新后 ext/Updated.php 文件未被覆盖
+9. ✅ 更新后版本号正确更新
+10. ✅ 临时文件被正确清理
 
 ## 致谢
 感谢所有为本项目提供反馈和建议的用户。
 
 ---
 
-**完整更新内容请访问**: https://github.com/GamblerIX/DPlayerMAX/docs/Changelog/v1.1.3.log
+**完整更新内容请访问**: https://github.com/GamblerIX/DPlayerMAX/blob/main/docs/Changelog/v1.1.3.log

@@ -11,17 +11,6 @@ if (!defined('__TYPECHO_ROOT_DIR__')) exit;
  */
 class DPlayerMAX_Plugin implements Typecho_Plugin_Interface
 {
-    /**
-     * 内存缓存（用于单次请求内的缓存）
-     * @var array
-     */
-    private static $memoryCache = [];
-
-    /**
-     * 缓存TTL（秒）
-     */
-    const CACHE_TTL = 300; // 5分钟
-
     public static function activate()
     {
         Typecho_Plugin::factory('Widget_Abstract_Contents')->contentEx = array('DPlayerMAX_Plugin', 'replacePlayer');
@@ -265,772 +254,46 @@ EOF;
 
 
     /**
-     * 获取本地版本号
-     * @return string 返回本地版本号
+     * 检查更新（代理方法）
+     * 
+     * @return array 返回更新状态信息
      */
-    private static function getLocalVersion()
+    public static function checkUpdate()
     {
-        $versionFile = __DIR__ . '/VERSION';
+        $updatedFile = __DIR__ . '/ext/Updated.php';
         
-        try {
-            // 如果VERSION文件不存在，返回Plugin.php中的版本号
-            if (!file_exists($versionFile)) {
-                return '1.1.3';
-            }
-            
-            // 读取VERSION文件
-            $version = @file_get_contents($versionFile);
-            
-            if ($version === false) {
-                self::logError('无法读取本地VERSION文件', 'FILE');
-                return '1.1.3';
-            }
-            
-            // 返回trim后的版本号
-            return trim($version);
-        } catch (Exception $e) {
-            self::logError('获取本地版本异常: ' . $e->getMessage(), 'EXCEPTION');
-            return '1.1.3';
-        }
-    }
-
-    /**
-     * 比较版本号
-     * @param string $local 本地版本
-     * @param string $remote 远程版本
-     * @return int 返回1表示有更新，0表示相同，-1表示本地更新
-     */
-    private static function compareVersion($local, $remote)
-    {
-        return version_compare($remote, $local);
-    }
-
-    /**
-     * 检查更新（增强版，支持缓存和强制刷新）
-     * @param bool $forceRefresh 是否强制刷新（忽略缓存）
-     * @return array 返回包含状态和信息的数组
-     */
-    public static function checkUpdate($forceRefresh = false)
-    {
-        // 1. 检查自动更新是否启用
-        if (!self::isAutoUpdateEnabled()) {
-            return self::buildDisabledStatus();
-        }
-
-        // 2. 如果未强制刷新，检查内存缓存
-        if (!$forceRefresh && isset(self::$memoryCache['update_check'])) {
-            $cached = self::$memoryCache['update_check'];
-            // 检查缓存是否过期
-            if (time() - $cached['timestamp'] < self::CACHE_TTL) {
-                $cached['fromCache'] = true;
-                return $cached;
-            }
-        }
-
-        // 3. 获取本地版本
-        $localVersion = self::getLocalVersion();
-
-        // 4. 获取远程版本（增强版）
-        $apiResult = self::fetchRemoteVersion();
-
-        // 5. 处理API请求失败的情况
-        if (!$apiResult['success']) {
-            $result = self::buildErrorStatus(
-                $localVersion,
-                $apiResult['error'],
-                $apiResult['errorType']
-            );
-            // 即使失败也缓存结果（短时间），避免频繁请求
-            self::$memoryCache['update_check'] = $result;
-            return $result;
-        }
-
-        // 6. 比较版本号
-        $remoteVersion = $apiResult['version'];
-        $compareResult = self::compareVersion($localVersion, $remoteVersion);
-
-        // 7. 构建结果
-        $result = self::buildSuccessStatus($localVersion, $remoteVersion, $compareResult);
-
-        // 8. 更新缓存
-        self::$memoryCache['update_check'] = $result;
-
-        return $result;
-    }
-
-    /**
-     * 检查自动更新是否启用
-     * @return bool
-     */
-    private static function isAutoUpdateEnabled()
-    {
-        try {
-            $options = Helper::options()->plugin('DPlayerMAX');
-            return !isset($options->autoUpdate) || $options->autoUpdate != '0';
-        } catch (Exception $e) {
-            return true;
-        }
-    }
-
-    /**
-     * 获取远程版本（增强版，带详细错误处理）
-     * @return array 返回包含成功状态、版本号、错误信息的数组
-     */
-    private static function fetchRemoteVersion()
-    {
-        $url = 'https://raw.githubusercontent.com/GamblerIX/DPlayerMAX/main/VERSION';
-        
-        try {
-            $context = stream_context_create([
-                'http' => [
-                    'timeout' => 10,
-                    'ignore_errors' => true,
-                    'method' => 'GET',
-                    'header' => "User-Agent: DPlayerMAX-Plugin\r\n"
-                ]
-            ]);
-
-            $startTime = microtime(true);
-            $content = @file_get_contents($url, false, $context);
-            $duration = microtime(true) - $startTime;
-
-            if ($content === false) {
-                return self::handleRequestFailure($http_response_header ?? null, $duration);
-            }
-
-            if (isset($http_response_header)) {
-                $statusCode = self::parseStatusCode($http_response_header);
-                if ($statusCode !== 200) {
-                    return self::handleHttpError($statusCode);
-                }
-            }
-
-            $version = trim($content);
-            if (!self::validateVersionFormat($version)) {
-                self::logError('版本号格式错误: ' . $version, 'FORMAT');
-                return [
-                    'success' => false,
-                    'version' => null,
-                    'error' => '版本号格式不正确',
-                    'errorType' => 'FORMAT'
-                ];
-            }
-
-            return [
-                'success' => true,
-                'version' => $version,
-                'error' => null,
-                'errorType' => null
-            ];
-
-        } catch (Exception $e) {
-            self::logError('获取远程版本异常: ' . $e->getMessage(), 'EXCEPTION');
+        if (!file_exists($updatedFile)) {
             return [
                 'success' => false,
-                'version' => null,
-                'error' => $e->getMessage(),
-                'errorType' => 'UNKNOWN'
-            ];
-        }
-    }
-
-    /**
-     * 处理请求失败
-     * @param array|null $headers HTTP响应头
-     * @param float $duration 请求耗时
-     * @return array
-     */
-    private static function handleRequestFailure($headers, $duration)
-    {
-        if ($duration >= 10) {
-            self::logError('请求超时 (耗时: ' . $duration . '秒)', 'TIMEOUT');
-            return [
-                'success' => false,
-                'version' => null,
-                'error' => '请求超时',
-                'errorType' => 'TIMEOUT'
-            ];
-        }
-
-        self::logError('网络连接失败', 'NETWORK');
-        return [
-            'success' => false,
-            'version' => null,
-            'error' => '无法连接到GitHub',
-            'errorType' => 'NETWORK'
-        ];
-    }
-
-    /**
-     * 处理HTTP错误
-     * @param int $statusCode HTTP状态码
-     * @return array
-     */
-    private static function handleHttpError($statusCode)
-    {
-        $errorMap = [
-            404 => ['error' => '远程版本文件不存在', 'type' => 'NOT_FOUND'],
-            403 => ['error' => '无权限访问', 'type' => 'PERMISSION'],
-            429 => ['error' => 'API请求过于频繁', 'type' => 'RATE_LIMIT']
-        ];
-
-        $errorInfo = $errorMap[$statusCode] ?? ['error' => "HTTP错误: {$statusCode}", 'type' => 'HTTP_ERROR'];
-        
-        self::logError($errorInfo['error'] . " (HTTP {$statusCode})", $errorInfo['type']);
-        
-        return [
-            'success' => false,
-            'version' => null,
-            'error' => $errorInfo['error'],
-            'errorType' => $errorInfo['type']
-        ];
-    }
-
-    /**
-     * 从响应头中解析HTTP状态码
-     * @param array $headers HTTP响应头数组
-     * @return int|null
-     */
-    private static function parseStatusCode($headers)
-    {
-        if (empty($headers) || !is_array($headers)) {
-            return null;
-        }
-
-        if (preg_match('/HTTP\/\d\.\d\s+(\d+)/', $headers[0], $matches)) {
-            return (int)$matches[1];
-        }
-
-        return null;
-    }
-
-    /**
-     * 验证版本号格式
-     * @param string $version 版本号
-     * @return bool
-     */
-    private static function validateVersionFormat($version)
-    {
-        return preg_match('/^\d+\.\d+\.\d+$/', $version) === 1;
-    }
-
-    /**
-     * 构建禁用状态的返回数据
-     * @return array
-     */
-    private static function buildDisabledStatus()
-    {
-        return [
-            'status' => 'disabled',
-            'localVersion' => self::getLocalVersion(),
-            'remoteVersion' => null,
-            'hasUpdate' => false,
-            'message' => '自动检查更新已禁用',
-            'error' => null,
-            'errorType' => null,
-            'timestamp' => time(),
-            'fromCache' => false
-        ];
-    }
-
-    /**
-     * 构建错误状态的返回数据
-     * @param string $localVersion 本地版本
-     * @param string $error 错误信息
-     * @param string $errorType 错误类型
-     * @return array
-     */
-    private static function buildErrorStatus($localVersion, $error, $errorType)
-    {
-        $message = self::getErrorMessage($errorType, $error);
-
-        return [
-            'status' => 'error',
-            'localVersion' => $localVersion,
-            'remoteVersion' => null,
-            'hasUpdate' => false,
-            'message' => $message,
-            'error' => $error,
-            'errorType' => $errorType,
-            'timestamp' => time(),
-            'fromCache' => false
-        ];
-    }
-
-    /**
-     * 构建成功状态的返回数据
-     * @param string $localVersion 本地版本
-     * @param string $remoteVersion 远程版本
-     * @param int $compareResult 版本比较结果
-     * @return array
-     */
-    private static function buildSuccessStatus($localVersion, $remoteVersion, $compareResult)
-    {
-        if ($compareResult > 0) {
-            return [
-                'status' => 'update-available',
-                'localVersion' => $localVersion,
-                'remoteVersion' => $remoteVersion,
-                'hasUpdate' => true,
-                'message' => "发现新版本 {$remoteVersion}，当前版本 {$localVersion}",
-                'error' => null,
-                'errorType' => null,
-                'timestamp' => time(),
-                'fromCache' => false
-            ];
-        } elseif ($compareResult === 0) {
-            return [
-                'status' => 'up-to-date',
-                'localVersion' => $localVersion,
-                'remoteVersion' => $remoteVersion,
+                'localVersion' => '1.1.3',
+                'remoteVersion' => null,
                 'hasUpdate' => false,
-                'message' => "当前已是最新版本 {$localVersion}",
-                'error' => null,
-                'errorType' => null,
-                'timestamp' => time(),
-                'fromCache' => false
-            ];
-        } else {
-            return [
-                'status' => 'up-to-date',
-                'localVersion' => $localVersion,
-                'remoteVersion' => $remoteVersion,
-                'hasUpdate' => false,
-                'message' => "当前版本 {$localVersion} 高于远程版本 {$remoteVersion}",
-                'error' => null,
-                'errorType' => null,
-                'timestamp' => time(),
-                'fromCache' => false
+                'message' => '更新组件不存在，请重新安装插件'
             ];
         }
+        
+        require_once $updatedFile;
+        return DPlayerMAX_UpdateManager::checkUpdate();
     }
 
     /**
-     * 根据错误类型获取用户友好的错误消息
-     * @param string $errorType 错误类型
-     * @param string $error 原始错误信息
-     * @return string
-     */
-    private static function getErrorMessage($errorType, $error)
-    {
-        $messages = [
-            'NETWORK' => '无法连接到GitHub，请检查服务器网络设置',
-            'TIMEOUT' => '请求超时，请稍后重试',
-            'FORMAT' => '远程版本文件格式错误，请联系开发者',
-            'RATE_LIMIT' => 'GitHub API请求过于频繁，请1小时后再试',
-            'NOT_FOUND' => '远程版本文件不存在',
-            'PERMISSION' => '无权限访问GitHub资源'
-        ];
-
-        return $messages[$errorType] ?? '发生未知错误：' . $error;
-    }
-
-    /**
-     * 递归复制文件和目录
-     * @param string $source 源目录
-     * @param string $dest 目标目录
-     * @return bool 成功返回true，失败返回false
-     */
-    private static function recursiveCopy($source, $dest)
-    {
-        // 如果源不存在，返回false
-        if (!file_exists($source)) {
-            return false;
-        }
-        
-        // 如果是文件，直接复制
-        if (is_file($source)) {
-            return copy($source, $dest);
-        }
-        
-        // 如果是目录，创建目标目录
-        if (!is_dir($dest)) {
-            if (!@mkdir($dest, 0755, true)) {
-                return false;
-            }
-        }
-        
-        // 遍历源目录
-        $dir = opendir($source);
-        if ($dir === false) {
-            return false;
-        }
-        
-        while (($file = readdir($dir)) !== false) {
-            if ($file == '.' || $file == '..') {
-                continue;
-            }
-            
-            $srcPath = $source . '/' . $file;
-            $destPath = $dest . '/' . $file;
-            
-            // 递归复制
-            if (!self::recursiveCopy($srcPath, $destPath)) {
-                closedir($dir);
-                return false;
-            }
-        }
-        
-        closedir($dir);
-        return true;
-    }
-
-    /**
-     * 备份当前插件
-     * @param string $backupDir 备份目录路径
-     * @return bool 成功返回true，失败返回false
-     */
-    private static function backupPlugin($backupDir)
-    {
-        try {
-            // 创建备份目录（带时间戳）
-            $timestamp = date('YmdHis');
-            $backupPath = $backupDir . '/backup_' . $timestamp;
-            
-            if (!@mkdir($backupPath, 0755, true)) {
-                return false;
-            }
-            
-            // 获取当前插件目录
-            $pluginDir = __DIR__;
-            
-            // 递归复制所有文件
-            return self::recursiveCopy($pluginDir, $backupPath);
-        } catch (Exception $e) {
-            return false;
-        }
-    }
-
-    /**
-     * 清理备份和临时文件
-     * @param string $dir 要清理的目录
-     * @return bool 成功返回true，失败返回false
-     */
-    private static function cleanupBackup($dir)
-    {
-        if (!file_exists($dir)) {
-            return true;
-        }
-        
-        if (is_file($dir)) {
-            return @unlink($dir);
-        }
-        
-        // 递归删除目录
-        $files = array_diff(scandir($dir), ['.', '..']);
-        foreach ($files as $file) {
-            $path = $dir . '/' . $file;
-            if (is_dir($path)) {
-                if (!self::cleanupBackup($path)) {
-                    return false;
-                }
-            } else {
-                if (!@unlink($path)) {
-                    return false;
-                }
-            }
-        }
-        
-        return @rmdir($dir);
-    }
-
-    /**
-     * 从备份恢复插件
-     * @param string $backupDir 备份目录路径
-     * @return bool 成功返回true，失败返回false
-     */
-    private static function restorePlugin($backupDir)
-    {
-        // 验证备份目录存在
-        if (!file_exists($backupDir) || !is_dir($backupDir)) {
-            return false;
-        }
-        
-        try {
-            $pluginDir = __DIR__;
-            
-            // 删除当前插件文件（除了备份目录）
-            $files = array_diff(scandir($pluginDir), ['.', '..', basename($backupDir)]);
-            foreach ($files as $file) {
-                $path = $pluginDir . '/' . $file;
-                if (is_dir($path)) {
-                    self::cleanupBackup($path);
-                } else {
-                    @unlink($path);
-                }
-            }
-            
-            // 从备份恢复所有文件
-            return self::recursiveCopy($backupDir, $pluginDir);
-        } catch (Exception $e) {
-            return false;
-        }
-    }
-
-    /**
-     * 下载更新包
-     * @param string $tempDir 临时目录路径
-     * @return string|false 返回下载文件路径或false
-     */
-    private static function downloadUpdate($tempDir)
-    {
-        $url = 'https://github.com/GamblerIX/DPlayerMAX/archive/refs/heads/main.zip';
-        
-        // 验证URL来源
-        if (!self::validateDownloadUrl($url)) {
-            self::logError('无效的下载URL: ' . $url, 'SECURITY');
-            return false;
-        }
-        
-        $zipFile = $tempDir . '/update.zip';
-        
-        // 创建临时目录
-        if (!file_exists($tempDir)) {
-            if (!@mkdir($tempDir, 0755, true)) {
-                return false;
-            }
-        }
-        
-        // 设置超时和错误处理
-        $context = stream_context_create([
-            'http' => [
-                'timeout' => 300,
-                'ignore_errors' => true
-            ]
-        ]);
-        
-        // 下载文件
-        $content = @file_get_contents($url, false, $context);
-        
-        if ($content === false) {
-            return false;
-        }
-        
-        // 验证文件大小（至少1KB）
-        if (strlen($content) < 1024) {
-            return false;
-        }
-        
-        // 保存到临时文件
-        if (@file_put_contents($zipFile, $content) === false) {
-            return false;
-        }
-        
-        return $zipFile;
-    }
-
-    /**
-     * 验证下载URL的安全性
-     * @param string $url 下载URL
-     * @return bool URL是否安全
-     */
-    private static function validateDownloadUrl($url)
-    {
-        // 只允许从GitHub官方仓库下载
-        $allowedDomains = [
-            'github.com',
-            'raw.githubusercontent.com'
-        ];
-        
-        $parsedUrl = parse_url($url);
-        
-        if (!isset($parsedUrl['host'])) {
-            return false;
-        }
-        
-        // 验证域名
-        if (!in_array($parsedUrl['host'], $allowedDomains)) {
-            self::logError('不允许的下载域名: ' . $parsedUrl['host'], 'SECURITY');
-            return false;
-        }
-        
-        // 验证协议为HTTPS
-        if (!isset($parsedUrl['scheme']) || $parsedUrl['scheme'] !== 'https') {
-            self::logError('必须使用HTTPS协议', 'SECURITY');
-            return false;
-        }
-        
-        return true;
-    }
-
-    /**
-     * 解压更新包
-     * @param string $zipFile zip文件路径
-     * @param string $extractDir 解压目录
-     * @return string|false 返回解压后的插件目录路径或false
-     */
-    private static function extractUpdate($zipFile, $extractDir)
-    {
-        // 检查ZipArchive扩展
-        if (!class_exists('ZipArchive')) {
-            return false;
-        }
-        
-        $zip = new ZipArchive();
-        
-        // 打开zip文件
-        if ($zip->open($zipFile) !== true) {
-            return false;
-        }
-        
-        // 解压到临时目录
-        if (!$zip->extractTo($extractDir)) {
-            $zip->close();
-            return false;
-        }
-        
-        $zip->close();
-        
-        // GitHub的zip包会包含一个DPlayerMAX-main目录
-        $extractedDir = $extractDir . '/DPlayerMAX-main';
-        
-        if (!file_exists($extractedDir)) {
-            return false;
-        }
-        
-        return $extractedDir;
-    }
-
-    /**
-     * 安装更新（复制文件）
-     * @param string $sourceDir 源目录
-     * @param string $targetDir 目标目录
-     * @return bool 成功返回true，失败返回false
-     */
-    private static function installUpdate($sourceDir, $targetDir)
-    {
-        // 跳过的文件和目录
-        $skipFiles = ['.git', '.gitignore', '.github'];
-        
-        try {
-            $files = array_diff(scandir($sourceDir), ['.', '..']);
-            
-            foreach ($files as $file) {
-                // 跳过不必要的文件
-                if (in_array($file, $skipFiles)) {
-                    continue;
-                }
-                
-                $srcPath = $sourceDir . '/' . $file;
-                $destPath = $targetDir . '/' . $file;
-                
-                if (is_dir($srcPath)) {
-                    // 递归复制目录
-                    if (!self::recursiveCopy($srcPath, $destPath)) {
-                        return false;
-                    }
-                } else {
-                    // 复制文件
-                    if (!copy($srcPath, $destPath)) {
-                        return false;
-                    }
-                }
-            }
-            
-            return true;
-        } catch (Exception $e) {
-            return false;
-        }
-    }
-
-    /**
-     * 执行完整的更新流程
+     * 执行更新（代理方法）
+     * 
      * @return array 返回更新结果
      */
     public static function performUpdate()
     {
-        $pluginDir = __DIR__;
-        $tempDir = $pluginDir . '/temp_update';
-        $backupDir = $pluginDir . '/backup';
-        $backupPath = null;
+        $updatedFile = __DIR__ . '/ext/Updated.php';
         
-        try {
-            // 1. 创建备份
-            if (!self::backupPlugin($backupDir)) {
-                self::logError('备份失败', 'BACKUP');
-                return [
-                    'success' => false,
-                    'message' => '备份失败，更新已取消',
-                    'error' => '无法创建备份'
-                ];
-            }
-            
-            // 获取最新的备份目录
-            $backups = glob($backupDir . '/backup_*');
-            if (empty($backups)) {
-                self::logError('找不到备份目录', 'BACKUP');
-                return [
-                    'success' => false,
-                    'message' => '备份失败，更新已取消',
-                    'error' => '找不到备份目录'
-                ];
-            }
-            $backupPath = end($backups);
-            
-            // 2. 下载更新包
-            $zipFile = self::downloadUpdate($tempDir);
-            if ($zipFile === false) {
-                self::logError('下载更新包失败', 'DOWNLOAD');
-                self::cleanupBackup($tempDir);
-                return [
-                    'success' => false,
-                    'message' => '下载更新失败',
-                    'error' => '无法从GitHub下载更新包'
-                ];
-            }
-            
-            // 3. 解压更新包
-            $extractedDir = self::extractUpdate($zipFile, $tempDir);
-            if ($extractedDir === false) {
-                self::logError('解压更新包失败', 'EXTRACT');
-                self::cleanupBackup($tempDir);
-                return [
-                    'success' => false,
-                    'message' => '解压更新失败',
-                    'error' => '无法解压更新包或ZipArchive扩展未安装'
-                ];
-            }
-            
-            // 4. 安装更新
-            if (!self::installUpdate($extractedDir, $pluginDir)) {
-                // 安装失败，恢复备份
-                self::logError('安装更新失败，正在恢复备份', 'INSTALL');
-                self::restorePlugin($backupPath);
-                self::cleanupBackup($tempDir);
-                return [
-                    'success' => false,
-                    'message' => '安装更新失败，已恢复到原版本',
-                    'error' => '文件复制失败'
-                ];
-            }
-            
-            // 5. 清理临时文件和备份
-            self::cleanupBackup($tempDir);
-            self::cleanupBackup($backupDir);
-            
-            self::logError('更新成功完成', 'SUCCESS');
-            return [
-                'success' => true,
-                'message' => '更新成功！插件已更新到最新版本',
-                'error' => null
-            ];
-            
-        } catch (Exception $e) {
-            // 发生异常，尝试恢复备份
-            self::logError('更新过程中发生异常: ' . $e->getMessage(), 'EXCEPTION');
-            
-            if ($backupPath && file_exists($backupPath)) {
-                self::logError('正在从备份恢复', 'RESTORE');
-                self::restorePlugin($backupPath);
-            }
-            self::cleanupBackup($tempDir);
-            
+        if (!file_exists($updatedFile)) {
             return [
                 'success' => false,
-                'message' => '更新过程中发生错误，已恢复到原版本',
-                'error' => $e->getMessage()
+                'message' => '更新组件不存在，请重新安装插件'
             ];
         }
+        
+        require_once $updatedFile;
+        return DPlayerMAX_UpdateManager::performUpdate();
     }
 
     /**
@@ -1039,9 +302,18 @@ EOF;
      */
     private static function renderUpdateStatusWidget()
     {
-        // 获取更新状态
+        // 获取初始状态（不执行实际的更新检查）
         $updateInfo = self::checkUpdate();
-        $status = $updateInfo['status'];
+        
+        // 确定状态
+        $status = 'not-checked';
+        if (isset($updateInfo['hasUpdate']) && $updateInfo['hasUpdate']) {
+            $status = 'update-available';
+        } elseif (isset($updateInfo['success']) && $updateInfo['success']) {
+            $status = 'up-to-date';
+        } elseif (isset($updateInfo['success']) && !$updateInfo['success']) {
+            $status = 'error';
+        }
         
         // 渲染CSS样式
         $html = self::renderStyles();
@@ -1058,22 +330,13 @@ EOF;
         // 渲染状态消息
         $html .= '<div class="update-status">';
         $html .= '<p class="status-message">' . htmlspecialchars($updateInfo['message']) . '</p>';
-        
-        if (isset($updateInfo['fromCache']) && $updateInfo['fromCache']) {
-            $html .= '<p class="cache-notice" style="font-size: 12px; color: #6c757d;">（使用缓存数据）</p>';
-        }
-        
-        if ($updateInfo['timestamp']) {
-            $timeStr = date('Y-m-d H:i:s', $updateInfo['timestamp']);
-            $html .= '<p class="last-check-time">最后检查: ' . htmlspecialchars($timeStr) . '</p>';
-        }
         $html .= '</div>';
         
         // 渲染操作按钮
         $html .= '<div class="update-actions">';
         $html .= '<button type="button" id="dplayermax-check-update-btn" class="btn">检查更新</button>';
         
-        if ($updateInfo['hasUpdate']) {
+        if (isset($updateInfo['hasUpdate']) && $updateInfo['hasUpdate']) {
             $html .= '<button type="button" id="dplayermax-perform-update-btn" class="btn primary">立即更新</button>';
             $releaseUrl = 'https://github.com/GamblerIX/DPlayerMAX/releases';
             $html .= '<a href="' . $releaseUrl . '" target="_blank" class="btn">查看更新日志</a>';
@@ -1098,7 +361,7 @@ EOF;
     private static function renderStatusLight($status)
     {
         $titles = [
-            'disabled' => '自动检查更新已禁用',
+            'not-checked' => '还没有检查更新',
             'up-to-date' => '已是最新版本',
             'update-available' => '有新版本可用',
             'error' => '检查更新时出错'
@@ -1170,6 +433,11 @@ EOF;
     margin-left: 10px;
     box-shadow: 0 0 5px rgba(0,0,0,0.2);
     vertical-align: middle;
+}
+
+.dplayermax-status-light.status-not-checked {
+    background-color: #6c757d;
+    box-shadow: 0 0 5px rgba(108, 117, 125, 0.4);
 }
 
 .dplayermax-status-light.status-disabled {
@@ -1303,7 +571,7 @@ CSS;
             checkBtn.textContent = '检查中...';
             statusSpan.innerHTML = '<span class="loading-spinner"></span>';
             
-            fetch('{$updateUrl}?do=update&action=check&force=1')
+            fetch('{$updateUrl}?do=update&action=check')
                 .then(function(response) { return response.json(); })
                 .then(function(data) {
                     statusSpan.textContent = '检查完成';
@@ -1322,7 +590,7 @@ CSS;
     // 立即更新
     if (performBtn) {
         performBtn.addEventListener('click', function() {
-            if (!confirm('确定要更新插件吗？\\n\\n更新过程中会自动备份当前版本，如果更新失败会自动恢复。\\n建议在更新前手动备份重要数据。')) {
+            if (!confirm('确定要更新插件吗？\\n\\n建议在更新前手动备份重要数据。')) {
                 return;
             }
             
@@ -1444,7 +712,17 @@ class DPlayerMAX_Action extends Typecho_Widget implements Widget_Interface_Do
      */
     public function action()
     {
-        $this->widget('Widget_User')->pass('administrator');
+        // 验证用户权限，但不抛出异常
+        $user = $this->widget('Widget_User');
+        if (!$user->pass('administrator', true)) {
+            $this->response->throwJson([
+                'success' => false,
+                'message' => '权限不足',
+                'error' => '只有管理员可以执行更新操作'
+            ]);
+            return;
+        }
+        
         $this->on($this->request->is('do=update'))->update();
     }
 
@@ -1453,26 +731,11 @@ class DPlayerMAX_Action extends Typecho_Widget implements Widget_Interface_Do
      */
     public function update()
     {
-        // 验证用户权限
-        $user = $this->widget('Widget_User');
-        if (!$user->pass('administrator', true)) {
-            $this->response->throwJson([
-                'success' => false,
-                'message' => '权限不足',
-                'error' => '只有管理员可以执行更新操作'
-            ]);
-        }
-
         $action = $this->request->get('action', 'check');
 
         if ($action === 'check') {
-            // 检查更新，支持强制刷新
-            $forceRefresh = $this->request->get('force', '0') == '1';
-            $result = DPlayerMAX_Plugin::checkUpdate($forceRefresh);
-            $this->response->throwJson($result);
-        } elseif ($action === 'status') {
-            // 获取更新状态（不强制刷新）
-            $result = DPlayerMAX_Plugin::checkUpdate(false);
+            // 检查更新
+            $result = DPlayerMAX_Plugin::checkUpdate();
             $this->response->throwJson($result);
         } elseif ($action === 'perform') {
             // 执行更新
@@ -1481,8 +744,7 @@ class DPlayerMAX_Action extends Typecho_Widget implements Widget_Interface_Do
         } else {
             $this->response->throwJson([
                 'success' => false,
-                'message' => '无效的操作',
-                'error' => '不支持的action参数'
+                'message' => '无效的操作'
             ]);
         }
     }
