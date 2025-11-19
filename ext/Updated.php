@@ -13,31 +13,48 @@
 
 // 处理 HTTP 请求（当直接访问此文件时）
 if (isset($_GET['action']) && !defined('__TYPECHO_ROOT_DIR__')) {
+    // 关闭错误显示，防止 HTML 错误信息
+    ini_set('display_errors', 0);
+    error_reporting(0);
+    
     // 设置响应头
     header('Content-Type: application/json; charset=utf-8');
     
-    // 定义 Typecho 根目录
-    define('__TYPECHO_ROOT_DIR__', dirname(dirname(dirname(dirname(__FILE__)))));
-    
-    // 加载 Typecho
-    require_once __TYPECHO_ROOT_DIR__ . '/config.inc.php';
-    
-    // 验证用户权限
-    session_start();
-    $user = Typecho_Widget::widget('Widget_User');
-    
-    if (!$user->hasLogin() || !$user->pass('administrator', true)) {
-        echo json_encode([
-            'success' => false,
-            'message' => '权限不足，只有管理员可以执行更新操作'
-        ], JSON_UNESCAPED_UNICODE);
-        exit;
-    }
-    
-    // 获取操作类型
-    $action = $_GET['action'];
-    
     try {
+        // 定义 Typecho 根目录
+        define('__TYPECHO_ROOT_DIR__', dirname(dirname(dirname(dirname(__FILE__)))));
+        
+        // 检查 config.inc.php 是否存在
+        $configFile = __TYPECHO_ROOT_DIR__ . '/config.inc.php';
+        if (!file_exists($configFile)) {
+            echo json_encode([
+                'success' => false,
+                'message' => '无法找到 Typecho 配置文件'
+            ], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+        
+        // 加载 Typecho
+        require_once $configFile;
+        
+        // 验证用户权限
+        if (session_status() == PHP_SESSION_NONE) {
+            session_start();
+        }
+        
+        $user = Typecho_Widget::widget('Widget_User');
+        
+        if (!$user->hasLogin() || !$user->pass('administrator', true)) {
+            echo json_encode([
+                'success' => false,
+                'message' => '权限不足，只有管理员可以执行更新操作'
+            ], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+        
+        // 获取操作类型
+        $action = $_GET['action'];
+        
         if ($action === 'check') {
             $result = DPlayerMAX_UpdateManager::checkUpdate();
         } elseif ($action === 'perform') {
@@ -54,7 +71,15 @@ if (isset($_GET['action']) && !defined('__TYPECHO_ROOT_DIR__')) {
     } catch (Exception $e) {
         echo json_encode([
             'success' => false,
-            'message' => '操作失败: ' . $e->getMessage()
+            'message' => '操作失败: ' . $e->getMessage(),
+            'trace' => $e->getTraceAsString()
+        ], JSON_UNESCAPED_UNICODE);
+    } catch (Error $e) {
+        echo json_encode([
+            'success' => false,
+            'message' => 'PHP 错误: ' . $e->getMessage(),
+            'file' => $e->getFile(),
+            'line' => $e->getLine()
         ], JSON_UNESCAPED_UNICODE);
     }
     exit;
