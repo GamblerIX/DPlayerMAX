@@ -61,4 +61,19 @@ class DPlayerMAX_ShortcodeParser
             . '(?:(\\/)\\]|\\](?:([^\\[]*+(?:\\[(?!\\/\\2\\])[^\\[]*+)*+)\\[\\/\\2\\])?)'
             . '(\\]?)';
     }
+    
+    /**
+     * 检查是否为 B 站链接
+     */
+    public static function isBilibiliUrl($url)
+    {
+        if (!$url) {
+            return false;
+        }
+        
+        return (strpos($url, 'bilibili.com') !== false || 
+                strpos($url, 'b23.tv') !== false ||
+                preg_match('/BV[a-zA-Z0-9]+/', $url) ||
+                preg_match('/av\d+/', $url));
+    }
 }
