@@ -227,11 +227,29 @@ class DPlayerMAX_UpdateManager
      */
     const GITHUB_REPO = 'GamblerIX/DPlayerMAX';
     const GITHUB_BRANCH = 'main';
-    
+
     /**
      * 网络请求超时时间（秒）
      */
-    const NETWORK_TIMEOUT = 10;
+    const NETWORK_TIMEOUT = 30;
+
+    /**
+     * GitHub 镜像列表（按优先级排序）
+     */
+    private static $mirrors = [
+        'raw' => [
+            'https://raw.githubusercontent.com/',
+            'https://ghfast.top/https://raw.githubusercontent.com/',
+            'https://raw.gitmirror.com/',
+            'https://raw.fgit.cf/',
+        ],
+        'zip' => [
+            'https://github.com/',
+            'https://ghfast.top/https://github.com/',
+            'https://hub.gitmirror.com/https://github.com/',
+            'https://gh.ddlc.top/https://github.com/',
+        ]
+    ];
     
     /**
      * 获取本地版本号
@@ -411,109 +429,109 @@ class DPlayerMAX_UpdateManager
     
     /**
      * 获取远程版本号
-     * 
+     *
      * @return array 返回包含成功状态、版本号、错误信息的数组
      */
     private static function fetchRemoteVersion()
     {
-        $url = 'https://raw.githubusercontent.com/' . self::GITHUB_REPO . '/' . self::GITHUB_BRANCH . '/VERSION';
-        
-        try {
-            $context = stream_context_create([
-                'http' => [
-                    'timeout' => self::NETWORK_TIMEOUT,
-                    'ignore_errors' => true,
-                    'method' => 'GET',
-                    'header' => "User-Agent: DPlayerMAX-Plugin\r\n"
-                ]
-            ]);
+        $path = self::GITHUB_REPO . '/' . self::GITHUB_BRANCH . '/VERSION';
 
-            $content = @file_get_contents($url, false, $context);
+        // 尝试所有镜像
+        foreach (self::$mirrors['raw'] as $mirror) {
+            $url = $mirror . $path;
 
-            if ($content === false) {
-                return [
-                    'success' => false,
-                    'version' => null,
-                    'error' => '无法连接到GitHub',
-                    'errorType' => 'NETWORK'
-                ];
+            try {
+                $context = stream_context_create([
+                    'http' => [
+                        'timeout' => self::NETWORK_TIMEOUT,
+                        'ignore_errors' => true,
+                        'method' => 'GET',
+                        'header' => "User-Agent: DPlayerMAX-Plugin\r\n"
+                    ],
+                    'ssl' => [
+                        'verify_peer' => false,
+                        'verify_peer_name' => false
+                    ]
+                ]);
+
+                $content = @file_get_contents($url, false, $context);
+
+                if ($content !== false) {
+                    $version = trim($content);
+
+                    // 验证版本号格式
+                    if (preg_match('/^\d+\.\d+\.\d+$/', $version)) {
+                        return [
+                            'success' => true,
+                            'version' => $version,
+                            'error' => null,
+                            'errorType' => null,
+                            'mirror' => $mirror
+                        ];
+                    }
+                }
+            } catch (Exception $e) {
+                continue;
             }
-
-            $version = trim($content);
-            
-            // 验证版本号格式
-            if (!preg_match('/^\d+\.\d+\.\d+$/', $version)) {
-                return [
-                    'success' => false,
-                    'version' => null,
-                    'error' => '版本号格式不正确',
-                    'errorType' => 'FORMAT'
-                ];
-            }
-
-            return [
-                'success' => true,
-                'version' => $version,
-                'error' => null,
-                'errorType' => null
-            ];
-
-        } catch (Exception $e) {
-            return [
-                'success' => false,
-                'version' => null,
-                'error' => $e->getMessage(),
-                'errorType' => 'UNKNOWN'
-            ];
         }
+
+        return [
+            'success' => false,
+            'version' => null,
+            'error' => '无法连接到GitHub',
+            'errorType' => 'NETWORK'
+        ];
     }
     
     /**
      * 下载更新包
-     * 
+     *
      * @param string $tempDir 临时目录路径
      * @return string|false 返回下载文件路径或false
      */
     private static function downloadUpdate($tempDir)
     {
-        $url = 'https://github.com/' . self::GITHUB_REPO . '/archive/refs/heads/' . self::GITHUB_BRANCH . '.zip';
+        $path = self::GITHUB_REPO . '/archive/refs/heads/' . self::GITHUB_BRANCH . '.zip';
         $zipFile = $tempDir . '/update.zip';
-        
+
         // 创建临时目录
         if (!file_exists($tempDir)) {
             if (!@mkdir($tempDir, 0755, true)) {
                 return false;
             }
         }
-        
-        // 设置超时和错误处理
-        $context = stream_context_create([
-            'http' => [
-                'timeout' => self::NETWORK_TIMEOUT,
-                'ignore_errors' => true,
-                'method' => 'GET',
-                'header' => "User-Agent: DPlayerMAX-Plugin\r\n"
-            ]
-        ]);
-        
-        // 下载文件
-        $content = @file_get_contents($url, false, $context);
-        
-        if ($content === false) {
-            return false;
+
+        // 尝试所有镜像
+        foreach (self::$mirrors['zip'] as $mirror) {
+            $url = $mirror . $path;
+
+            // 设置超时和错误处理
+            $context = stream_context_create([
+                'http' => [
+                    'timeout' => self::NETWORK_TIMEOUT,
+                    'ignore_errors' => true,
+                    'method' => 'GET',
+                    'header' => "User-Agent: DPlayerMAX-Plugin\r\n",
+                    'follow_location' => true
+                ],
+                'ssl' => [
+                    'verify_peer' => false,
+                    'verify_peer_name' => false
+                ]
+            ]);
+
+            // 下载文件
+            $content = @file_get_contents($url, false, $context);
+
+            if ($content !== false && strlen($content) > 1024) {
+                // 保存到临时文件
+                if (@file_put_contents($zipFile, $content) !== false) {
+                    return $zipFile;
+                }
+            }
         }
-        
-        // 验证文件大小（至少1KB）
-        if (strlen($content) < 1024) {
-            return false;
-        }
-        
-        // 保存到临时文件
-        if (@file_put_contents($zipFile, $content) === false) {
-            return false;
-        }
-        
-        return $zipFile;
+
+        return false;
     }
     
     /**
