@@ -145,7 +145,7 @@ class DPlayerMAX_UpdateManager
     {
         // 检查目标目录是否可写
         if (!is_writable($dst)) {
-            self::$lastError = "插件目录不可写: $dst";
+            self::$lastError = "插件目录不可写，请执行: chmod -R 777 $dst 或手动下载: https://github.com/GamblerIX/DPlayerMAX/archive/refs/heads/main.zip";
             return false;
         }
 
