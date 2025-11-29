@@ -60,22 +60,73 @@ class DPlayerMAX_UpdateManager
     private static function curl($url, $opts = [])
     {
         $ch = curl_init();
-        curl_setopt_array($ch, [CURLOPT_URL => $url, CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => $opts['timeout'] ?? self::TIMEOUT, CURLOPT_CONNECTTIMEOUT => 10, CURLOPT_SSL_VERIFYPEER => false, CURLOPT_FOLLOWLOCATION => true, CURLOPT_MAXREDIRS => 5, CURLOPT_USERAGENT => 'DPlayerMAX/2.0', CURLOPT_ENCODING => 'gzip', CURLOPT_HTTPHEADER => $opts['headers'] ?? ['Accept: */*', 'Cache-Control: no-cache']]);
+        $headers = $opts['headers'] ?? ['Accept: */*', 'Cache-Control: no-cache'];
+        $curlOpts = [
+            CURLOPT_URL => $url,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => $opts['timeout'] ?? self::TIMEOUT,
+            CURLOPT_CONNECTTIMEOUT => 10,
+            CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_MAXREDIRS => 5,
+            CURLOPT_USERAGENT => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            CURLOPT_HTTPHEADER => $headers
+        ];
+        // 只对非二进制请求启用 gzip
+        if (!isset($opts['binary']) || !$opts['binary']) {
+            $curlOpts[CURLOPT_ENCODING] = 'gzip';
+        }
+        curl_setopt_array($ch, $curlOpts);
         $res = curl_exec($ch);
         $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        self::$lastError = curl_error($ch);
+        self::$lastHttpCode = $code;
         curl_close($ch);
         return ($res !== false && $code === 200) ? $res : false;
     }
+
+    private static $lastError = '';
+    private static $lastHttpCode = 0;
 
     private static function download($tmp)
     {
         $path = self::REPO . '/archive/refs/heads/' . self::BRANCH . '.zip';
         $file = $tmp . '/update.zip';
-        if (!file_exists($tmp) && !@mkdir($tmp, 0755, true)) return false;
-        foreach (self::RELEASE_MIRRORS as $m) {
-            $c = self::curl($m . $path, ['timeout' => 60, 'headers' => ['Accept: application/octet-stream']]);
-            if ($c && strlen($c) > 1024 && substr($c, 0, 2) === 'PK' && @file_put_contents($file, $c)) return $file;
+
+        // 创建临时目录
+        if (!file_exists($tmp)) {
+            if (!@mkdir($tmp, 0755, true)) {
+                self::$lastError = '无法创建临时目录: ' . $tmp;
+                return false;
+            }
         }
+
+        // 检查目录是否可写
+        if (!is_writable($tmp)) {
+            self::$lastError = '临时目录不可写: ' . $tmp;
+            return false;
+        }
+
+        foreach (self::RELEASE_MIRRORS as $m) {
+            $url = $m . $path;
+            // 下载时不使用 gzip 编码，避免与 ZIP 文件冲突
+            $c = self::curl($url, [
+                'timeout' => 120,
+                'binary' => true,
+                'headers' => ['Accept: application/octet-stream, application/zip, */*']
+            ]);
+
+            if (!$c) continue;
+
+            // 验证是否为有效的 ZIP 文件 (PK 签名)
+            if (strlen($c) > 1024 && substr($c, 0, 2) === 'PK') {
+                if (@file_put_contents($file, $c)) {
+                    return $file;
+                }
+                self::$lastError = '写入文件失败: ' . $file;
+            }
+        }
+
         return false;
     }
 
@@ -127,7 +178,23 @@ class DPlayerMAX_UpdateManager
 
     private static function errMsg($t)
     {
-        $m = ['NETWORK' => '无法连接GitHub', 'DOWNLOAD' => '下载失败', 'EXTRACT' => '解压失败', 'INSTALL' => '安装失败', 'UNKNOWN' => '发生错误'];
-        return $m[$t] ?? '检查更新失败';
+        $m = [
+            'NETWORK' => '无法连接GitHub',
+            'DOWNLOAD' => '下载失败',
+            'EXTRACT' => '解压失败 (需要 ZipArchive 扩展)',
+            'INSTALL' => '安装失败',
+            'UNKNOWN' => '发生错误'
+        ];
+        $msg = $m[$t] ?? '检查更新失败';
+
+        // 附加详细错误信息
+        if (self::$lastError) {
+            $msg .= ' [' . self::$lastError . ']';
+        }
+        if (self::$lastHttpCode && self::$lastHttpCode !== 200) {
+            $msg .= ' (HTTP ' . self::$lastHttpCode . ')';
+        }
+
+        return $msg;
     }
 }
