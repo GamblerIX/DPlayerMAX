@@ -23,7 +23,8 @@ DPlayerMAX 是一个为 Typecho 设计的视频播放器插件，基于 DPlayer 
 - 🔗 支持 HLS (m3u8) 格式
 - 🎞️ 支持 FLV 格式
 - ⚡ 本地资源加载，无需依赖外部 CDN
-- 🔄 自更新检测 *新增！
+- 🔄 自更新检测 *新增！*
+- 📺 **B站视频解析** - 支持免登录 1080P 播放 *新增！*
 
 ## 配置选项
 
@@ -40,6 +41,12 @@ DPlayerMAX 是一个为 Typecho 设计的视频播放器插件，基于 DPlayer 
 
 ### FLV 支持
 开启后可以播放 FLV 格式的视频。
+
+### B站视频解析
+开启后可直接使用 B站视频链接，支持免登录 1080P 高清播放。
+
+### B站默认清晰度
+选择 B站视频的默认播放清晰度（1080P/720P/480P/360P）。
 
 ## 使用方法
 
@@ -78,6 +85,30 @@ DPlayerMAX 是一个为 Typecho 设计的视频播放器插件，基于 DPlayer 
 [dplayer url="https://example.com/video.mp4" subtitle="true" subtitleurl="https://example.com/subtitle.vtt" /]
 ```
 
+### B站视频解析
+
+开启 B站视频解析功能后，可以直接使用 B站视频链接：
+
+#### 基本用法
+```
+[dplayer url="https://www.bilibili.com/video/BV133xFzKEsd/"]
+```
+
+#### 指定分P
+```
+[dplayer url="https://www.bilibili.com/video/BV133xFzKEsd/" page="2"]
+```
+
+#### 指定清晰度
+```
+[dplayer url="https://www.bilibili.com/video/BV133xFzKEsd/" quality="1080p"]
+```
+
+#### 支持的链接格式
+- BV 号格式：`https://www.bilibili.com/video/BV133xFzKEsd/`
+- AV 号格式：`https://www.bilibili.com/video/av170001/`
+- 带分P参数：`https://www.bilibili.com/video/BV133xFzKEsd/?p=2`
+
 ### 可用参数
 
 | 参数 | 说明 | 默认值 |
@@ -95,6 +126,9 @@ DPlayerMAX 是一个为 Typecho 设计的视频播放器插件，基于 DPlayer 
 | `subtitle` | 开启字幕（true/false） | false |
 | `subtitleurl` | 字幕文件地址 | - |
 | `subtitletype` | 字幕类型（webvtt/srt） | webvtt |
+| `page` | B站视频分P（仅B站） | 1 |
+| `quality` | B站清晰度（仅B站） | 1080p |
+| `bilibili` | 强制B站解析（true/false） | false |
 
 ## 从旧版 DPlayer 迁移
 

@@ -24,10 +24,10 @@ class DPlayerMAX_PlayerRenderer
         static $loaded = false;
         if ($loaded) return;
         $loaded = true;
-        
+
         $url = \Utils\Helper::options()->pluginUrl . '/DPlayerMAX';
         $config = \Utils\Helper::options()->plugin('DPlayerMAX');
-        
+
         // 加载可选的格式支持
         if (isset($config->hls) && $config->hls) {
             echo '<script src="' . $url . '/plugin/hls.min.js"></script>' . "\n";
@@ -35,7 +35,7 @@ class DPlayerMAX_PlayerRenderer
         if (isset($config->flv) && $config->flv) {
             echo '<script src="' . $url . '/plugin/flv.min.js"></script>' . "\n";
         }
-        
+
         // 加载播放器和初始化脚本
         echo '<script src="' . $url . '/assets/DPlayer.min.js"></script>' . "\n";
         echo self::renderInitScript();
@@ -78,6 +78,31 @@ JS;
     public static function parsePlayer($attrs)
     {
         $pluginConfig = \Utils\Helper::options()->plugin('DPlayerMAX');
+
+        // 检查是否为 B站链接
+        $url = isset($attrs['url']) ? $attrs['url'] : '';
+        $isBilibili = isset($attrs['bilibili']) && $attrs['bilibili'] == 'true';
+
+        if (!$isBilibili && !empty($url)) {
+            require_once __DIR__ . '/ShortcodeParser.php';
+            $isBilibili = DPlayerMAX_ShortcodeParser::isBilibiliUrl($url);
+        }
+
+        // 检查是否启用了 B站解析
+        $bilibiliEnabled = isset($pluginConfig->bilibili) && $pluginConfig->bilibili;
+
+        if ($isBilibili && $bilibiliEnabled) {
+            return self::parseBilibiliPlayer($attrs, $pluginConfig);
+        }
+
+        return self::parseNormalPlayer($attrs, $pluginConfig);
+    }
+
+    /**
+     * 解析普通视频播放器
+     */
+    private static function parseNormalPlayer($attrs, $pluginConfig)
+    {
         $theme = isset($pluginConfig->theme) && $pluginConfig->theme ? $pluginConfig->theme : '#FADFA3';
         $api = isset($pluginConfig->api) ? $pluginConfig->api : '';
 
@@ -99,7 +124,7 @@ JS;
                 'thumbnails' => isset($attrs['thumbnails']) ? $attrs['thumbnails'] : null,
             ],
         ];
-        
+
         // 弹幕配置
         if (isset($attrs['danmu']) && $attrs['danmu'] == 'true') {
             $config['danmaku'] = [
@@ -111,7 +136,7 @@ JS;
                 'unlimited' => true,
             ];
         }
-        
+
         // 字幕配置
         if (isset($attrs['subtitle']) && $attrs['subtitle'] == 'true') {
             $config['subtitle'] = [
@@ -122,8 +147,80 @@ JS;
                 'color' => isset($attrs['subtitlecolor']) ? $attrs['subtitlecolor'] : '#b7daff',
             ];
         }
-        
+
         $json = htmlspecialchars(json_encode($config), ENT_QUOTES, 'UTF-8');
         return "<div class=\"dplayer\" data-config='{$json}'></div>";
+    }
+
+    /**
+     * 解析 B站视频播放器
+     */
+    private static function parseBilibiliPlayer($attrs, $pluginConfig)
+    {
+        require_once __DIR__ . '/bilibili/BilibiliParser.php';
+
+        $url = isset($attrs['url']) ? $attrs['url'] : '';
+        $page = isset($attrs['page']) ? (int)$attrs['page'] : 1;
+        $quality = isset($attrs['quality']) ? $attrs['quality'] :
+                  (isset($pluginConfig->bilibili_quality) ? $pluginConfig->bilibili_quality : '1080p');
+
+        // 解析 B站视频
+        $result = DPlayerMAX_Bilibili_Parser::parse($url, $page, $quality);
+
+        if (!$result['success']) {
+            return self::renderError($result['error'], $url);
+        }
+
+        $theme = isset($pluginConfig->theme) && $pluginConfig->theme ? $pluginConfig->theme : '#FADFA3';
+
+        $config = [
+            'live' => false,
+            'autoplay' => isset($attrs['autoplay']) && $attrs['autoplay'] == 'true',
+            'theme' => isset($attrs['theme']) ? $attrs['theme'] : $theme,
+            'loop' => isset($attrs['loop']) && $attrs['loop'] == 'true',
+            'screenshot' => isset($attrs['screenshot']) && $attrs['screenshot'] == 'true',
+            'hotkey' => true,
+            'preload' => 'metadata',
+            'lang' => isset($attrs['lang']) ? $attrs['lang'] : 'zh-cn',
+            'volume' => isset($attrs['volume']) ? (float)$attrs['volume'] : 0.7,
+            'video' => [
+                'url' => $result['video_url'],
+                'pic' => isset($attrs['pic']) ? $attrs['pic'] : $result['pic'],
+                'type' => 'auto',
+            ],
+        ];
+
+        // 添加 B站视频元数据
+        $config['bilibili'] = [
+            'bvid' => $result['bvid'],
+            'title' => $result['title'],
+            'page' => $result['page'],
+            'quality' => $result['quality']
+        ];
+
+        $json = htmlspecialchars(json_encode($config), ENT_QUOTES, 'UTF-8');
+
+        // 添加视频标题提示
+        $titleAttr = htmlspecialchars($result['title'], ENT_QUOTES, 'UTF-8');
+
+        return "<div class=\"dplayer\" data-config='{$json}' title=\"{$titleAttr}\"></div>";
+    }
+
+    /**
+     * 渲染错误信息
+     */
+    public static function renderError($message, $url = '')
+    {
+        $safeMessage = htmlspecialchars($message, ENT_QUOTES, 'UTF-8');
+        $safeUrl = htmlspecialchars($url, ENT_QUOTES, 'UTF-8');
+
+        $html = '<div class="dplayer-error" style="padding:20px;background:#f0f0f0;border:1px solid #ddd;border-radius:4px;text-align:center;">';
+        $html .= '<p style="color:#666;margin:0 0 10px 0;">视频加载失败: ' . $safeMessage . '</p>';
+        if ($url) {
+            $html .= '<a href="' . $safeUrl . '" target="_blank" style="color:#00a1d6;">点击查看原视频</a>';
+        }
+        $html .= '</div>';
+
+        return $html;
     }
 }
