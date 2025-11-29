@@ -93,6 +93,17 @@
     margin-right: 10px;
 }
 
+.dplayermax-update-widget .update-actions .btn.danger {
+    background-color: #dc3545;
+    border-color: #dc3545;
+    color: #fff;
+}
+
+.dplayermax-update-widget .update-actions .btn.danger:hover {
+    background-color: #c82333;
+    border-color: #bd2130;
+}
+
 .dplayermax-update-widget .loading-spinner {
     display: inline-block;
     width: 16px;

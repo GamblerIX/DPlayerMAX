@@ -1434,6 +1434,8 @@ button[data-balloon] {
   width: auto;
   line-height: 22px;
   font-size: 14px;
+  padding: 8px;
+  vertical-align: middle;
 }
 .dplayer-controller .dplayer-icons .dplayer-icon.dplayer-comment-icon {
   padding: 10px 9px 9px;

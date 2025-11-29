@@ -1,110 +1,73 @@
-name: Auto Release
+name: Release
 
 on:
   push:
-    branches:
-      - main
-    paths:
-      - 'VERSION'
+    tags:
+      - 'v*'
 
 jobs:
   release:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-
+    
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
+      
       - name: Get version
         id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+      
+      - name: Get commit message
+        id: commit
         run: |
-          VERSION=$(cat VERSION)
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "tag=v$VERSION" >> $GITHUB_OUTPUT
-
-      - name: Check if tag exists
-        id: check_tag
+          MSG=$(git log -1 --pretty=%B)
+          echo "MESSAGE<<EOF" >> $GITHUB_OUTPUT
+          echo "$MSG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+      
+      - name: Package Plugin
         run: |
-          if git rev-parse "v${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
-            echo "exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "exists=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Get changelog
-        id: changelog
-        if: steps.check_tag.outputs.exists == 'false'
-        run: |
-          VERSION=${{ steps.version.outputs.version }}
-          CHANGELOG_FILE="Changelog/v${VERSION}.log"
-
-          if [ -f "$CHANGELOG_FILE" ]; then
-            # 读取 changelog 内容
-            CHANGELOG=$(cat "$CHANGELOG_FILE")
-          else
-            # 从最近的提交信息生成
-            CHANGELOG=$(git log -1 --pretty=format:"%B")
-          fi
-
-          # 写入到文件以避免多行问题
-          echo "$CHANGELOG" > /tmp/changelog.txt
-          echo "file=/tmp/changelog.txt" >> $GITHUB_OUTPUT
-
-      - name: Create release package
-        if: steps.check_tag.outputs.exists == 'false'
-        run: |
-          VERSION=${{ steps.version.outputs.version }}
-
-          # 创建临时目录
-          mkdir -p /tmp/DPlayerMAX
-
-          # 复制文件，排除不需要的目录
-          rsync -av --exclude='.git' \
-                    --exclude='.github' \
-                    --exclude='.claude' \
-                    --exclude='docs' \
-                    --exclude='.gitignore' \
-                    --exclude='*.log' \
-                    ./ /tmp/DPlayerMAX/
-
-          # 创建 zip 包
-          cd /tmp
-          zip -r DPlayerMAX-v${VERSION}.zip DPlayerMAX
-
-          # 移动到工作目录
-          mv DPlayerMAX-v${VERSION}.zip $GITHUB_WORKSPACE/
-
+          zip -r DPlayerMAX-${{ steps.version.outputs.VERSION }}.zip . \
+            -x ".git/*" ".github/*" "CLAUDE.md"
+      
       - name: Create Release
-        if: steps.check_tag.outputs.exists == 'false'
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: DPlayerMAX ${{ steps.version.outputs.tag }}
-          body_path: ${{ steps.changelog.outputs.file }}
-          files: |
-            DPlayerMAX-v${{ steps.version.outputs.version }}.zip
+          name: DPlayerMAX ${{ steps.version.outputs.VERSION }}
+          body: |
+            ## 更新摘要
+            
+            ${{ steps.commit.outputs.MESSAGE }}
+            
+            ---
+            
+            ## 安装说明
+            
+            1. 下载 `DPlayerMAX-${{ steps.version.outputs.VERSION }}.zip`
+            2. 解压到 `usr/plugins/DPlayerMAX`
+            3. 后台启用插件
+            
+            ## 基本用法
+            
+            ```
+            [dplayer url="视频地址" /]
+            [dplayer url="https://www.bilibili.com/video/BVxxxxx" /]
+            ```
+            
+            ## 参数说明
+            
+            | 参数 | 说明 | 默认值 |
+            |------|------|--------|
+            | url | 视频地址（必填） | - |
+            | pic | 封面图 | - |
+            | autoplay | 自动播放 | false |
+            | loop | 循环播放 | false |
+            | page | B站分P | 1 |
+            | quality | B站清晰度 | 720p |
+            | mode | iframe/dplayer | dplayer |
+          files: DPlayerMAX-${{ steps.version.outputs.VERSION }}.zip
           draft: false
           prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Release Summary
-        if: steps.check_tag.outputs.exists == 'false'
-        run: |
-          echo "## Release Created! 🎉" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Version:** ${{ steps.version.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Assets:**" >> $GITHUB_STEP_SUMMARY
-          echo "- DPlayerMAX-v${{ steps.version.outputs.version }}.zip" >> $GITHUB_STEP_SUMMARY
-
-      - name: Skip Release
-        if: steps.check_tag.outputs.exists == 'true'
-        run: |
-          echo "## Release Skipped ⏭️" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Tag ${{ steps.version.outputs.tag }} already exists." >> $GITHUB_STEP_SUMMARY
