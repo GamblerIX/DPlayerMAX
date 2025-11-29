@@ -32,7 +32,8 @@ class DPlayerMAX_UpdateManager
     public static function performUpdate($force = false)
     {
         $dir = dirname(__DIR__);
-        $tmp = $dir . '/temp_update';
+        // 优先使用系统临时目录，避免插件目录权限问题
+        $tmp = sys_get_temp_dir() . '/dplayermax_update_' . md5($dir);
         try {
             if (!$force) { $chk = self::checkUpdate(); if ($chk['success'] && !$chk['hasUpdate']) return ['success' => false, 'message' => '已是最新版本']; }
             $zip = self::download($tmp);
