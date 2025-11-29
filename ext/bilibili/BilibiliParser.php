@@ -314,7 +314,7 @@ class DPlayerMAX_Bilibili_Parser
             'bvid' => $bvid,
             'cid' => $cid,
             'qn' => $quality,
-            'fnval' => 16, // 请求 DASH 格式
+            'fnval' => 1, // 请求 MP4 格式 (不使用DASH)
             'fnver' => 0,
             'fourk' => 1,
             'try_look' => 1 // 免登录试看
