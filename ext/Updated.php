@@ -143,26 +143,74 @@ class DPlayerMAX_UpdateManager
 
     private static function install($src, $dst)
     {
-        $skip = ['ext/Updated.php', '.git', '.github', '.gitignore', '.gitattributes'];
+        // 检查目标目录是否可写
+        if (!is_writable($dst)) {
+            self::$lastError = "插件目录不可写: $dst";
+            return false;
+        }
+
+        $skip = ['.git', '.github', '.gitignore', '.gitattributes'];
         $files = @scandir($src);
-        if (!$files) return false;
+        if (!$files) {
+            self::$lastError = "无法读取源目录: $src";
+            return false;
+        }
+
         foreach (array_diff($files, ['.', '..']) as $f) {
-            foreach ($skip as $s) if ($f === $s || strpos($f, $s . '/') === 0) continue 2;
-            $s = $src . '/' . $f; $d = $dst . '/' . $f;
-            if (is_dir($s)) { if (!self::rcopy($s, $d)) return false; }
-            else { if (!@copy($s, $d)) return false; }
+            // 跳过指定文件/目录
+            foreach ($skip as $s) {
+                if ($f === $s) continue 2;
+            }
+
+            $srcPath = $src . '/' . $f;
+            $dstPath = $dst . '/' . $f;
+
+            if (is_dir($srcPath)) {
+                if (!self::rcopy($srcPath, $dstPath)) return false;
+            } else {
+                if (!@copy($srcPath, $dstPath)) {
+                    self::$lastError = "复制文件失败: $f";
+                    return false;
+                }
+            }
         }
         return true;
     }
 
     private static function rcopy($src, $dst)
     {
-        if (!file_exists($src)) return false;
-        if (is_file($src)) return @copy($src, $dst);
-        if (!is_dir($dst) && !@mkdir($dst, 0755, true)) return false;
+        if (!file_exists($src)) {
+            self::$lastError = "源不存在: $src";
+            return false;
+        }
+
+        if (is_file($src)) {
+            if (!@copy($src, $dst)) {
+                self::$lastError = "复制失败: $src -> $dst";
+                return false;
+            }
+            return true;
+        }
+
+        if (!is_dir($dst) && !@mkdir($dst, 0755, true)) {
+            self::$lastError = "创建目录失败: $dst";
+            return false;
+        }
+
         $dir = @opendir($src);
-        if (!$dir) return false;
-        while (($f = readdir($dir)) !== false) { if ($f !== '.' && $f !== '..' && !self::rcopy($src . '/' . $f, $dst . '/' . $f)) { closedir($dir); return false; } }
+        if (!$dir) {
+            self::$lastError = "无法打开目录: $src";
+            return false;
+        }
+
+        while (($f = readdir($dir)) !== false) {
+            if ($f !== '.' && $f !== '..') {
+                if (!self::rcopy($src . '/' . $f, $dst . '/' . $f)) {
+                    closedir($dir);
+                    return false;
+                }
+            }
+        }
         closedir($dir);
         return true;
     }
