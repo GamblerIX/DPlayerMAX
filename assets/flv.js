@@ -1380,7 +1380,6 @@
                         var t = this._searchNearestSegmentBefore(e),
                           n = this._list[t].syncPoints;
                         0 === n.length && t > 0;
-
                       )
                         (t--, (n = this._list[t].syncPoints));
                       return n.length > 0 ? n[n.length - 1] : null;
@@ -1718,7 +1717,6 @@
                             var t = this._sourceBuffers[e],
                               n = this._pendingRemoveRanges[e];
                             n.length && !t.updating;
-
                           ) {
                             var i = n.shift();
                             t.remove(i.start, i.end);
@@ -1771,7 +1769,6 @@
                         for (
                           var e = this._pendingSourceBufferInit;
                           e.length;
-
                         ) {
                           var t = e.shift();
                           this.appendInitSegment(t, !0);
@@ -2960,7 +2957,6 @@
                               9 === (16777215 & r.getUint32(i - 4, !h)) &&
                               (_ = 3);
                               s < i - 4;
-
                             ) {
                               var m = e.parseObject(t, n + s, i - s - _);
                               if (m.objectEnd) break;
@@ -2978,7 +2974,6 @@
                               9 === (16777215 & r.getUint32(i - 4, !h)) &&
                               (v = 3);
                               s < i - 8;
-
                             ) {
                               var g = e.parseVariable(t, n + s, i - s - v);
                               if (g.objectEnd) break;
@@ -3924,7 +3919,6 @@
                             _ = this._timestampBase + i,
                             m = 1 === s;
                           f < n;
-
                         ) {
                           if (f + 4 >= n) {
                             l.default.w(
@@ -9425,7 +9419,6 @@
                         for (
                           var h = 8, f = [], c = new _.MediaSegmentInfo();
                           n.length;
-
                         ) {
                           var m = n.shift(),
                             p = m.isKeyframe,

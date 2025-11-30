@@ -2737,7 +2737,6 @@
                   for (
                     var t = this.dan[this.danIndex], n = [];
                     t && this.options.time() > parseFloat(t.time);
-
                   )
                     (n.push(t), (t = this.dan[++this.danIndex]));
                   this.draw(n);
@@ -4069,7 +4068,6 @@
               t.push(e.fulfilled, e.rejected);
             });
           t.length;
-
         )
           n = n.then(t.shift(), t.shift());
         return n;

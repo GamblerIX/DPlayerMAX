@@ -32,8 +32,7 @@ class DPlayerMAX_UpdateManager
     public static function performUpdate($force = false)
     {
         $dir = dirname(__DIR__);
-        // 优先使用系统临时目录，避免插件目录权限问题
-        $tmp = sys_get_temp_dir() . '/dplayermax_update_' . md5($dir);
+        $tmp = $dir . '/temp_update';
         try {
             if (!$force) { $chk = self::checkUpdate(); if ($chk['success'] && !$chk['hasUpdate']) return ['success' => false, 'message' => '已是最新版本']; }
             $zip = self::download($tmp);
@@ -61,73 +60,22 @@ class DPlayerMAX_UpdateManager
     private static function curl($url, $opts = [])
     {
         $ch = curl_init();
-        $headers = $opts['headers'] ?? ['Accept: */*', 'Cache-Control: no-cache'];
-        $curlOpts = [
-            CURLOPT_URL => $url,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT => $opts['timeout'] ?? self::TIMEOUT,
-            CURLOPT_CONNECTTIMEOUT => 10,
-            CURLOPT_SSL_VERIFYPEER => false,
-            CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_MAXREDIRS => 5,
-            CURLOPT_USERAGENT => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            CURLOPT_HTTPHEADER => $headers
-        ];
-        // 只对非二进制请求启用 gzip
-        if (!isset($opts['binary']) || !$opts['binary']) {
-            $curlOpts[CURLOPT_ENCODING] = 'gzip';
-        }
-        curl_setopt_array($ch, $curlOpts);
+        curl_setopt_array($ch, [CURLOPT_URL => $url, CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => $opts['timeout'] ?? self::TIMEOUT, CURLOPT_CONNECTTIMEOUT => 10, CURLOPT_SSL_VERIFYPEER => false, CURLOPT_FOLLOWLOCATION => true, CURLOPT_MAXREDIRS => 5, CURLOPT_USERAGENT => 'DPlayerMAX/2.0', CURLOPT_ENCODING => 'gzip', CURLOPT_HTTPHEADER => $opts['headers'] ?? ['Accept: */*', 'Cache-Control: no-cache']]);
         $res = curl_exec($ch);
         $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        self::$lastError = curl_error($ch);
-        self::$lastHttpCode = $code;
         curl_close($ch);
         return ($res !== false && $code === 200) ? $res : false;
     }
-
-    private static $lastError = '';
-    private static $lastHttpCode = 0;
 
     private static function download($tmp)
     {
         $path = self::REPO . '/archive/refs/heads/' . self::BRANCH . '.zip';
         $file = $tmp . '/update.zip';
-
-        // 创建临时目录
-        if (!file_exists($tmp)) {
-            if (!@mkdir($tmp, 0755, true)) {
-                self::$lastError = '无法创建临时目录: ' . $tmp;
-                return false;
-            }
-        }
-
-        // 检查目录是否可写
-        if (!is_writable($tmp)) {
-            self::$lastError = '临时目录不可写: ' . $tmp;
-            return false;
-        }
-
+        if (!file_exists($tmp) && !@mkdir($tmp, 0755, true)) return false;
         foreach (self::RELEASE_MIRRORS as $m) {
-            $url = $m . $path;
-            // 下载时不使用 gzip 编码，避免与 ZIP 文件冲突
-            $c = self::curl($url, [
-                'timeout' => 120,
-                'binary' => true,
-                'headers' => ['Accept: application/octet-stream, application/zip, */*']
-            ]);
-
-            if (!$c) continue;
-
-            // 验证是否为有效的 ZIP 文件 (PK 签名)
-            if (strlen($c) > 1024 && substr($c, 0, 2) === 'PK') {
-                if (@file_put_contents($file, $c)) {
-                    return $file;
-                }
-                self::$lastError = '写入文件失败: ' . $file;
-            }
+            $c = self::curl($m . $path, ['timeout' => 60, 'headers' => ['Accept: application/octet-stream']]);
+            if ($c && strlen($c) > 1024 && substr($c, 0, 2) === 'PK' && @file_put_contents($file, $c)) return $file;
         }
-
         return false;
     }
 
@@ -143,74 +91,26 @@ class DPlayerMAX_UpdateManager
 
     private static function install($src, $dst)
     {
-        // 检查目标目录是否可写
-        if (!is_writable($dst)) {
-            self::$lastError = "插件目录不可写，请执行: chmod -R 777 $dst 或手动下载: https://github.com/GamblerIX/DPlayerMAX/archive/refs/heads/main.zip";
-            return false;
-        }
-
-        $skip = ['.git', '.github', '.gitignore', '.gitattributes'];
+        $skip = ['ext/Updated.php', '.git', '.github', '.gitignore', '.gitattributes'];
         $files = @scandir($src);
-        if (!$files) {
-            self::$lastError = "无法读取源目录: $src";
-            return false;
-        }
-
+        if (!$files) return false;
         foreach (array_diff($files, ['.', '..']) as $f) {
-            // 跳过指定文件/目录
-            foreach ($skip as $s) {
-                if ($f === $s) continue 2;
-            }
-
-            $srcPath = $src . '/' . $f;
-            $dstPath = $dst . '/' . $f;
-
-            if (is_dir($srcPath)) {
-                if (!self::rcopy($srcPath, $dstPath)) return false;
-            } else {
-                if (!@copy($srcPath, $dstPath)) {
-                    self::$lastError = "复制文件失败: $f";
-                    return false;
-                }
-            }
+            foreach ($skip as $s) if ($f === $s || strpos($f, $s . '/') === 0) continue 2;
+            $s = $src . '/' . $f; $d = $dst . '/' . $f;
+            if (is_dir($s)) { if (!self::rcopy($s, $d)) return false; }
+            else { if (!@copy($s, $d)) return false; }
         }
         return true;
     }
 
     private static function rcopy($src, $dst)
     {
-        if (!file_exists($src)) {
-            self::$lastError = "源不存在: $src";
-            return false;
-        }
-
-        if (is_file($src)) {
-            if (!@copy($src, $dst)) {
-                self::$lastError = "复制失败: $src -> $dst";
-                return false;
-            }
-            return true;
-        }
-
-        if (!is_dir($dst) && !@mkdir($dst, 0755, true)) {
-            self::$lastError = "创建目录失败: $dst";
-            return false;
-        }
-
+        if (!file_exists($src)) return false;
+        if (is_file($src)) return @copy($src, $dst);
+        if (!is_dir($dst) && !@mkdir($dst, 0755, true)) return false;
         $dir = @opendir($src);
-        if (!$dir) {
-            self::$lastError = "无法打开目录: $src";
-            return false;
-        }
-
-        while (($f = readdir($dir)) !== false) {
-            if ($f !== '.' && $f !== '..') {
-                if (!self::rcopy($src . '/' . $f, $dst . '/' . $f)) {
-                    closedir($dir);
-                    return false;
-                }
-            }
-        }
+        if (!$dir) return false;
+        while (($f = readdir($dir)) !== false) { if ($f !== '.' && $f !== '..' && !self::rcopy($src . '/' . $f, $dst . '/' . $f)) { closedir($dir); return false; } }
         closedir($dir);
         return true;
     }
@@ -227,23 +127,7 @@ class DPlayerMAX_UpdateManager
 
     private static function errMsg($t)
     {
-        $m = [
-            'NETWORK' => '无法连接GitHub',
-            'DOWNLOAD' => '下载失败',
-            'EXTRACT' => '解压失败 (需要 ZipArchive 扩展)',
-            'INSTALL' => '安装失败',
-            'UNKNOWN' => '发生错误'
-        ];
-        $msg = $m[$t] ?? '检查更新失败';
-
-        // 附加详细错误信息
-        if (self::$lastError) {
-            $msg .= ' [' . self::$lastError . ']';
-        }
-        if (self::$lastHttpCode && self::$lastHttpCode !== 200) {
-            $msg .= ' (HTTP ' . self::$lastHttpCode . ')';
-        }
-
-        return $msg;
+        $m = ['NETWORK' => '无法连接GitHub', 'DOWNLOAD' => '下载失败', 'EXTRACT' => '解压失败', 'INSTALL' => '安装失败', 'UNKNOWN' => '发生错误'];
+        return $m[$t] ?? '检查更新失败';
     }
 }

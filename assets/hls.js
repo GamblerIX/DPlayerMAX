@@ -5975,7 +5975,6 @@
                       for (
                         var a = this.cueRanges, n = !1, s = a.length;
                         s--;
-
                       ) {
                         var o = a[s],
                           l = u(o[0], o[1], t, r);
@@ -6334,7 +6333,6 @@
                       for (
                         var t = this.uint8ArrayToUint32Array_(e), r = !0, i = 0;
                         i < t.length && r;
-
                       )
                         ((r = t[i] === this.key[i]), i++);
                       if (!r) {
@@ -6435,7 +6433,6 @@
                           D = void 0,
                           O = void 0;
                         t < y.length;
-
                       ) {
                         for (
                           L = this.networkToHostOrderSwap(y[t]),
@@ -6828,7 +6825,6 @@
                             ((224 & e[c + 5]) >>> 5)),
                           (s -= h),
                           s > 0 && c + h + s <= v);
-
                         )
                           for (
                             g = m + f * u,
@@ -8534,7 +8530,6 @@
                             s = ((15 & e[t + 10]) << 8) | e[t + 11],
                             t += 12 + s;
                           t < n;
-
                         ) {
                           switch (
                             ((o = ((31 & e[t + 1]) << 8) | e[t + 2]), e[t])
@@ -8710,7 +8705,6 @@
                                 for (
                                   var d = 0, c = 0, h = !1, g = 0;
                                   !h && r.bytesAvailable > 1;
-
                                 ) {
                                   d = 0;
                                   do ((g = r.readUByte()), (d += g));
@@ -8846,7 +8840,6 @@
                           u === -1 &&
                           ((c = 0), (n = 31 & e[0]), (u = 0), (s = 1));
                           s < o;
-
                         )
                           if (((t = e[s++]), u))
                             if (1 !== u)
@@ -8923,7 +8916,6 @@
                         for (
                           var t, r, i = e.byteLength, a = [], n = 1;
                           n < i - 2;
-
                         )
                           0 === e[n] && 0 === e[n + 1] && 3 === e[n + 2]
                             ? (a.push(n + 2), (n += 2))
@@ -9028,7 +9020,6 @@
                             ((224 & h[n + 5]) >>> 5)),
                           (r -= s),
                           r > 0 && n + s + r <= d);
-
                         )
                           for (
                             l = p + a * i,
@@ -9061,7 +9052,6 @@
                             n = 0,
                             s = 0;
                           s < a && (t = this._parseMpeg(r, s, a, n++, i)) > 0;
-
                         )
                           s += t;
                       },
@@ -11410,7 +11400,6 @@
                           a = r.length,
                           n = a;
                         a--;
-
                       )
                         i += r[a].byteLength;
                       for (
@@ -12891,7 +12880,6 @@
                       for (
                         r = t < e ? -8589934592 : 8589934592;
                         Math.abs(e - t) > 4294967296;
-
                       )
                         e += r;
                       return e;
