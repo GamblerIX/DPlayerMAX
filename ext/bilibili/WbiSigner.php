@@ -13,12 +13,45 @@ class DPlayerMAX_Bilibili_WbiSigner
 
     public static function uuid()
     {
-        return sprintf('%04x%04x-%04x-%04x-%04x-%04x%04x%04x', mt_rand(0,0xffff), mt_rand(0,0xffff), mt_rand(0,0xffff), mt_rand(0,0x0fff)|0x4000, mt_rand(0,0x3fff)|0x8000, mt_rand(0,0xffff), mt_rand(0,0xffff), mt_rand(0,0xffff)) . 'infoc';
+        $f = __DIR__ . '/cache/cookies.json';
+        if (file_exists($f)) {
+            $d = @json_decode(file_get_contents($f), true);
+            if ($d && isset($d['uuid'], $d['time']) && time() - $d['time'] < 86400) return $d['uuid'];
+        }
+        
+        $uuid = sprintf('%04x%04x-%04x-%04x-%04x-%04x%04x%04x', mt_rand(0,0xffff), mt_rand(0,0xffff), mt_rand(0,0xffff), mt_rand(0,0x0fff)|0x4000, mt_rand(0,0x3fff)|0x8000, mt_rand(0,0xffff), mt_rand(0,0xffff), mt_rand(0,0xffff)) . 'infoc';
+        
+        self::saveCookies(['uuid' => $uuid]);
+        return $uuid;
     }
 
     public static function buvid()
     {
-        return strtoupper(substr(md5(uniqid()),0,8) . substr(md5(time()),0,4) . substr(md5(mt_rand()),0,4));
+        $f = __DIR__ . '/cache/cookies.json';
+        if (file_exists($f)) {
+            $d = @json_decode(file_get_contents($f), true);
+            if ($d && isset($d['buvid3'], $d['time']) && time() - $d['time'] < 86400) return $d['buvid3'];
+        }
+        
+        $mac = [];
+        for ($i = 0; $i < 6; $i++) $mac[] = sprintf('%02X', mt_rand(0, 255));
+        $macStr = implode(':', $mac);
+        $md5 = md5($macStr . time() . mt_rand());
+        $buvid = strtoupper(substr($md5, 0, 8) . '-' . substr($md5, 8, 4) . '-' . substr($md5, 12, 4) . '-' . substr($md5, 16, 4) . '-' . substr($md5, 20, 12)) . 'infoc';
+        
+        self::saveCookies(['buvid3' => $buvid]);
+        return $buvid;
+    }
+
+    private static function saveCookies($data)
+    {
+        $f = __DIR__ . '/cache/cookies.json';
+        $current = file_exists($f) ? (@json_decode(file_get_contents($f), true) ?: []) : [];
+        $merged = array_merge($current, $data);
+        $merged['time'] = time();
+        $dir = dirname($f);
+        if (!is_dir($dir)) @mkdir($dir, 0755, true);
+        @file_put_contents($f, json_encode($merged));
     }
 
     private static function loadCache()

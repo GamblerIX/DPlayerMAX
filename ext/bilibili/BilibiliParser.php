@@ -144,16 +144,6 @@ class DPlayerMAX_Bilibili_Parser
         $cached = self::cache($key, null, 'play_url');
         if ($cached) return $cached;
 
-        $res = self::curl('https://api.bilibili.com/x/player/playurl?' . http_build_query(['bvid' => $bvid, 'cid' => $cid, 'qn' => $quality, 'fnval' => 1, 'platform' => 'html5', 'high_quality' => 1]), 'https://www.bilibili.com/video/' . $bvid);
-        if ($res) {
-            $d = json_decode($res, true);
-            if ($d && $d['code'] === 0 && isset($d['data']['durl'])) {
-                $r = ['quality' => $d['data']['quality'] ?? $quality, 'quality_desc' => self::$qualityDesc[$d['data']['quality'] ?? $quality] ?? '未知', 'format' => 'mp4', 'video_url' => $d['data']['durl'][0]['url'], 'audio_url' => null, 'type' => 'mp4', 'accept_quality' => $d['data']['accept_quality'] ?? [$quality]];
-                self::cache($key, $r, 'play_url');
-                return $r;
-            }
-        }
-
         $params = DPlayerMAX_Bilibili_WbiSigner::sign(['bvid' => $bvid, 'cid' => $cid, 'qn' => $quality, 'fnval' => 16, 'fourk' => 1]);
         $res = self::curl('https://api.bilibili.com/x/player/wbi/playurl?' . http_build_query($params), 'https://www.bilibili.com/video/' . $bvid);
         if (!$res) return null;
