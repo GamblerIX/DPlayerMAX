@@ -39,11 +39,19 @@ class DPlayerMAX_Bilibili_Parser
 
     private static function headers($referer = 'https://www.bilibili.com/')
     {
-        return [
+        $ip = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? $_SERVER['REMOTE_ADDR'] ?? null;
+        $headers = [
             'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
             'Referer: ' . $referer, 'Accept: application/json', 'Accept-Language: zh-CN,zh;q=0.9',
             'Cookie: _uuid=' . DPlayerMAX_Bilibili_WbiSigner::uuid() . '; buvid3=' . DPlayerMAX_Bilibili_WbiSigner::buvid() . '; CURRENT_FNVAL=4048; CURRENT_QUALITY=64',
         ];
+        
+        if ($ip && filter_var($ip, FILTER_VALIDATE_IP)) {
+            $headers[] = 'X-Forwarded-For: ' . $ip;
+            $headers[] = 'Client-IP: ' . $ip;
+        }
+        
+        return $headers;
     }
 
     public static function bv2av($bvid)
