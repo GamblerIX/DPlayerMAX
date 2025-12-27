@@ -201,6 +201,26 @@ class DPlayerMAX_Bilibili_Parser
         $play = self::getPlayUrl($info['bvid'], $cid, self::parseQuality($quality));
         if (!$play || !$play['video_url']) return ['success' => false, 'error' => '获取播放地址失败', 'fallback' => self::generateIframe($info['bvid'], $pageNum, $opts), 'videoInfo' => ['bvid' => $video['bvid'], 'title' => $video['title'], 'pic' => $video['pic']]];
 
+        // Force Proxy for Bilibili streams
+        try {
+            $options = \Typecho\Widget::widget('Widget_Options');
+            $siteUrl = $options->siteUrl;
+            // Ensure siteUrl ends with / if not present (Typecho usually handles this but good to be safe)
+            if (substr($siteUrl, -1) !== '/') $siteUrl .= '/';
+            
+            // Construct proxy URL
+            $proxyBase = $siteUrl . '?dplayermax_api=video&url=';
+            
+            if (!empty($play['video_url'])) {
+                $play['video_url'] = $proxyBase . base64_encode($play['video_url']);
+            }
+            if (!empty($play['audio_url'])) {
+                $play['audio_url'] = $proxyBase . base64_encode($play['audio_url']);
+            }
+        } catch (\Exception $e) {
+            // Fallback to raw URL if something goes wrong
+        }
+
         return ['success' => true, 'bvid' => $video['bvid'], 'avid' => $video['avid'], 'title' => $video['title'], 'pic' => $video['pic'], 'duration' => $video['duration'], 'owner' => $video['owner'], 'page' => $pageNum, 'cid' => $cid, 'quality' => $play['quality'], 'quality_desc' => $play['quality_desc'], 'type' => $play['type'], 'video_url' => $play['video_url'], 'audio_url' => $play['audio_url'], 'accept_quality' => $play['accept_quality'], 'fallback' => self::generateIframe($info['bvid'], $pageNum, $opts)];
     }
 
