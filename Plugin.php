@@ -121,6 +121,16 @@ class DPlayerMAX_Plugin implements Typecho_Plugin_Interface
             _t('备用播放器'), _t('解析失败时使用官方播放器')
         ));
 
+        $form->addInput(new Typecho_Widget_Helper_Form_Element_Radio(
+            'bilibili_proxy', ['1' => _t('开启'), '0' => _t('关闭')], '0',
+            _t('强制代理'), _t('解决Referer防盗链导致的403错误，消耗服务器带宽')
+        ));
+
+        $form->addInput(new Typecho_Widget_Helper_Form_Element_Textarea(
+            'bilibili_cookie', null, null,
+            _t('B站 Cookie'), _t('填入 SESSDATA 用于获取更高清晰度 (如1080P)。格式: SESSDATA=xxx; buvid3=xxx')
+        ));
+
         echo self::renderInfoPanels();
     }
 

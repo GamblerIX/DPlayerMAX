@@ -34,16 +34,32 @@ class DPlayerMAX_Bilibili_Parser
             if ($d && isset($d['time'], $d['data']) && time() - $d['time'] < (self::$cacheTTL[$type] ?? 7200)) return $d['data'];
             return null;
         }
-        @file_put_contents($file, json_encode(['time' => time(), 'type' => $type, 'data' => $data], JSON_UNESCAPED_UNICODE));
+        @file_put_contents($file, json_encode(['time' => time(), 'type' => $type, 'data' => $data], JSON_UNESCAPED_UNICODE), LOCK_EX);
     }
 
     private static function headers($referer = 'https://www.bilibili.com/')
     {
         $ip = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? $_SERVER['REMOTE_ADDR'] ?? null;
+        
+        $cookie = '';
+        try {
+            $cfg = \Typecho\Widget::widget('Widget_Options')->plugin('DPlayerMAX');
+            if (!empty($cfg->bilibili_cookie)) {
+                $cookie = $cfg->bilibili_cookie;
+                // Ensure required flags if not present
+                if (strpos($cookie, 'CURRENT_FNVAL') === false) $cookie .= '; CURRENT_FNVAL=4048';
+                if (strpos($cookie, 'CURRENT_QUALITY') === false) $cookie .= '; CURRENT_QUALITY=64';
+            }
+        } catch (\Exception $e) {}
+
+        if (empty($cookie)) {
+            $cookie = '_uuid=' . DPlayerMAX_Bilibili_WbiSigner::uuid() . '; buvid3=' . DPlayerMAX_Bilibili_WbiSigner::buvid() . '; CURRENT_FNVAL=4048; CURRENT_QUALITY=64';
+        }
+
         $headers = [
             'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
             'Referer: ' . $referer, 'Accept: application/json', 'Accept-Language: zh-CN,zh;q=0.9',
-            'Cookie: _uuid=' . DPlayerMAX_Bilibili_WbiSigner::uuid() . '; buvid3=' . DPlayerMAX_Bilibili_WbiSigner::buvid() . '; CURRENT_FNVAL=4048; CURRENT_QUALITY=64',
+            'Cookie: ' . $cookie,
         ];
         
         if ($ip && filter_var($ip, FILTER_VALIDATE_IP)) {
@@ -105,7 +121,7 @@ class DPlayerMAX_Bilibili_Parser
         $cached = self::cache('short_' . $url, null, 'short_url');
         if ($cached) return $cached;
         $ch = curl_init();
-        curl_setopt_array($ch, [CURLOPT_URL => $url, CURLOPT_RETURNTRANSFER => true, CURLOPT_HEADER => true, CURLOPT_NOBODY => true, CURLOPT_FOLLOWLOCATION => false, CURLOPT_TIMEOUT => 10, CURLOPT_SSL_VERIFYPEER => false]);
+        curl_setopt_array($ch, [CURLOPT_URL => $url, CURLOPT_RETURNTRANSFER => true, CURLOPT_HEADER => true, CURLOPT_NOBODY => true, CURLOPT_FOLLOWLOCATION => false, CURLOPT_TIMEOUT => 10, CURLOPT_SSL_VERIFYPEER => true]);
         curl_exec($ch);
         $redirect = curl_getinfo($ch, CURLINFO_REDIRECT_URL);
         
@@ -116,7 +132,7 @@ class DPlayerMAX_Bilibili_Parser
     private static function curl($url, $referer = 'https://www.bilibili.com/')
     {
         $ch = curl_init();
-        curl_setopt_array($ch, [CURLOPT_URL => $url, CURLOPT_RETURNTRANSFER => true, CURLOPT_HTTPHEADER => self::headers($referer), CURLOPT_TIMEOUT => 15, CURLOPT_CONNECTTIMEOUT => 10, CURLOPT_SSL_VERIFYPEER => false, CURLOPT_ENCODING => 'gzip', CURLOPT_FOLLOWLOCATION => true, CURLOPT_IPRESOLVE => CURL_IPRESOLVE_V4]);
+        curl_setopt_array($ch, [CURLOPT_URL => $url, CURLOPT_RETURNTRANSFER => true, CURLOPT_HTTPHEADER => self::headers($referer), CURLOPT_TIMEOUT => 15, CURLOPT_CONNECTTIMEOUT => 10, CURLOPT_SSL_VERIFYPEER => true, CURLOPT_ENCODING => 'gzip', CURLOPT_FOLLOWLOCATION => true, CURLOPT_IPRESOLVE => CURL_IPRESOLVE_V4]);
         for ($i = 0; $i < 3; $i++) {
             $res = curl_exec($ch);
             if ($res !== false && curl_errno($ch) === 0 && curl_getinfo($ch, CURLINFO_HTTP_CODE) === 200) break;
@@ -204,18 +220,21 @@ class DPlayerMAX_Bilibili_Parser
         // Force Proxy for Bilibili streams
         try {
             $options = \Typecho\Widget::widget('Widget_Options');
-            $siteUrl = $options->siteUrl;
-            // Ensure siteUrl ends with / if not present (Typecho usually handles this but good to be safe)
-            if (substr($siteUrl, -1) !== '/') $siteUrl .= '/';
+            $cfg = $options->plugin('DPlayerMAX');
             
-            // Construct proxy URL
-            $proxyBase = $siteUrl . '?dplayermax_api=video&url=';
-            
-            if (!empty($play['video_url'])) {
-                $play['video_url'] = $proxyBase . base64_encode($play['video_url']);
-            }
-            if (!empty($play['audio_url'])) {
-                $play['audio_url'] = $proxyBase . base64_encode($play['audio_url']);
+            // Only use proxy if setting is enabled
+            if (!empty($cfg->bilibili_proxy)) {
+                $siteUrl = $options->siteUrl;
+                if (substr($siteUrl, -1) !== '/') $siteUrl .= '/';
+                
+                $proxyBase = $siteUrl . '?dplayermax_api=video&url=';
+                
+                if (!empty($play['video_url'])) {
+                    $play['video_url'] = $proxyBase . base64_encode($play['video_url']);
+                }
+                if (!empty($play['audio_url'])) {
+                    $play['audio_url'] = $proxyBase . base64_encode($play['audio_url']);
+                }
             }
         } catch (\Exception $e) {
             // Fallback to raw URL if something goes wrong

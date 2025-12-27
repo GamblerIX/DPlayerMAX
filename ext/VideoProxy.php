@@ -19,6 +19,14 @@ class DPlayerMAX_VideoProxy
             'Referer: https://www.bilibili.com/',
             'Origin: https://www.bilibili.com',
         ];
+        
+        try {
+            $cfg = \Typecho\Widget::widget('Widget_Options')->plugin('DPlayerMAX');
+            if (!empty($cfg->bilibili_cookie)) {
+                $headers[] = 'Cookie: ' . $cfg->bilibili_cookie;
+            }
+        } catch (\Exception $e) {}
+
         if ($range) $headers[] = 'Range: ' . $range;
 
         $ch = curl_init($url);
@@ -33,7 +41,7 @@ class DPlayerMAX_VideoProxy
             CURLOPT_RETURNTRANSFER => false,
             CURLOPT_HEADER => false,
             CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_SSL_VERIFYPEER => true,
             CURLOPT_CONNECTTIMEOUT => 10,
             CURLOPT_TIMEOUT => 300,
             CURLOPT_HEADERFUNCTION => function($ch, $header) use (&$httpCode, &$contentType, &$contentLength, &$contentRange) {

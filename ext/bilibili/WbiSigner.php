@@ -51,7 +51,7 @@ class DPlayerMAX_Bilibili_WbiSigner
         $merged['time'] = time();
         $dir = dirname($f);
         if (!is_dir($dir)) @mkdir($dir, 0755, true);
-        @file_put_contents($f, json_encode($merged));
+        @file_put_contents($f, json_encode($merged), LOCK_EX);
     }
 
     private static function loadCache()
@@ -71,7 +71,7 @@ class DPlayerMAX_Bilibili_WbiSigner
     {
         $dir = dirname(self::cacheFile());
         if (!is_dir($dir)) @mkdir($dir, 0755, true);
-        @file_put_contents(self::cacheFile(), json_encode(['keys' => $keys, 'time' => time()]));
+        @file_put_contents(self::cacheFile(), json_encode(['keys' => $keys, 'time' => time()]), LOCK_EX);
         self::$keys = $keys;
         self::$cacheTime = time();
         self::$fallback = $keys;
@@ -83,7 +83,7 @@ class DPlayerMAX_Bilibili_WbiSigner
         if (self::loadCache()) return self::$keys;
 
         $ch = curl_init();
-        curl_setopt_array($ch, [CURLOPT_URL => 'https://api.bilibili.com/x/web-interface/nav', CURLOPT_RETURNTRANSFER => true, CURLOPT_HTTPHEADER => ['User-Agent: Mozilla/5.0 Chrome/120.0.0.0', 'Referer: https://www.bilibili.com/', 'Cookie: _uuid=' . self::uuid() . '; buvid3=' . self::buvid()], CURLOPT_TIMEOUT => 10, CURLOPT_SSL_VERIFYPEER => false, CURLOPT_ENCODING => 'gzip']);
+        curl_setopt_array($ch, [CURLOPT_URL => 'https://api.bilibili.com/x/web-interface/nav', CURLOPT_RETURNTRANSFER => true, CURLOPT_HTTPHEADER => ['User-Agent: Mozilla/5.0 Chrome/120.0.0.0', 'Referer: https://www.bilibili.com/', 'Cookie: _uuid=' . self::uuid() . '; buvid3=' . self::buvid()], CURLOPT_TIMEOUT => 10, CURLOPT_SSL_VERIFYPEER => true, CURLOPT_ENCODING => 'gzip']);
         for ($i = 0; $i < 3; $i++) {
             $res = curl_exec($ch);
             if ($res && curl_errno($ch) === 0 && curl_getinfo($ch, CURLINFO_HTTP_CODE) === 200) break;

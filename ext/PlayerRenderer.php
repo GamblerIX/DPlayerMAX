@@ -50,11 +50,18 @@ class DPlayerMAX_PlayerRenderer
 
     private static function renderInitScript()
     {
-        return <<<'JS'
+        // 对应 BilibiliParser 中的清晰度设置
+        $qualities = [
+            ['id' => 64, 'name' => '720P', 'key' => '720p'],
+            ['id' => 16, 'name' => '360P', 'key' => '360p']
+        ];
+        $qualityJson = json_encode($qualities);
+
+        return <<<JS
 <script>
 (function(){
 var players={},observer=null,playerId=0,initLock={},
-qualityOpts=[{id:64,name:'720P',key:'720p'},{id:16,name:'360P',key:'360p'}];
+qualityOpts={$qualityJson};
 
 function initPlayer(el){
     if(el.dataset.initialized)return;
@@ -161,7 +168,13 @@ function switchQ(pid,qk,qid,btn,list){
 
 function degradeToIframe(el){
     var fb=el.dataset.fallback;if(!fb)return;
-    try{var d=JSON.parse(fb);if(d.type==='iframe'&&d.src)el.innerHTML='<iframe class="bilibili-iframe" src="'+d.src+'" allowfullscreen="true" allow="autoplay; encrypted-media"></iframe>'}catch(e){}
+    try{
+        var d=JSON.parse(fb);
+        if(d.type==='iframe'&&d.src){
+            el.innerHTML='<div class="bilibili-player-container"><iframe class="bilibili-iframe" src="'+d.src+'" allowfullscreen="true" allow="autoplay; encrypted-media"></iframe></div>';
+            el.classList.remove('dplayer-lazy'); // Ensure lazy background is removed
+        }
+    }catch(e){}
 }
 
 function setupLazy(){
