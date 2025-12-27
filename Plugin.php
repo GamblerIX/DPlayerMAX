@@ -9,6 +9,13 @@
  */
 if (!defined('__TYPECHO_ROOT_DIR__')) exit;
 
+// 兼容 Typecho 1.2+ 的命名空间接口
+if (!interface_exists('Typecho_Plugin_Interface')) {
+    if (interface_exists('Typecho\Plugin\PluginInterface')) {
+        class_alias('Typecho\Plugin\PluginInterface', 'Typecho_Plugin_Interface');
+    }
+}
+
 class DPlayerMAX_Plugin implements Typecho_Plugin_Interface
 {
     const VERSION = '2.3.0';
