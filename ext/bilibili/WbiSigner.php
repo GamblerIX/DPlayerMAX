@@ -56,7 +56,6 @@ class DPlayerMAX_Bilibili_WbiSigner
             if ($res && curl_errno($ch) === 0 && curl_getinfo($ch, CURLINFO_HTTP_CODE) === 200) break;
             if ($i < 2) usleep(300000 * ($i + 1));
         }
-        curl_close($ch);
 
         if ($res) {
             $d = json_decode($res, true);

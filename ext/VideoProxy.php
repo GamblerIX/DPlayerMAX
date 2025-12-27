@@ -77,6 +77,5 @@ class DPlayerMAX_VideoProxy
             }
         }
         
-        curl_close($ch);
     }
 }

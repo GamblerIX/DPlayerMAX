@@ -63,7 +63,7 @@ class DPlayerMAX_UpdateManager
         curl_setopt_array($ch, [CURLOPT_URL => $url, CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => $opts['timeout'] ?? self::TIMEOUT, CURLOPT_CONNECTTIMEOUT => 10, CURLOPT_SSL_VERIFYPEER => false, CURLOPT_FOLLOWLOCATION => true, CURLOPT_MAXREDIRS => 5, CURLOPT_USERAGENT => 'DPlayerMAX/2.0', CURLOPT_ENCODING => 'gzip', CURLOPT_HTTPHEADER => $opts['headers'] ?? ['Accept: */*', 'Cache-Control: no-cache']]);
         $res = curl_exec($ch);
         $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
+        
         return ($res !== false && $code === 200) ? $res : false;
     }
 

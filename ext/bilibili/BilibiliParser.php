@@ -100,7 +100,7 @@ class DPlayerMAX_Bilibili_Parser
         curl_setopt_array($ch, [CURLOPT_URL => $url, CURLOPT_RETURNTRANSFER => true, CURLOPT_HEADER => true, CURLOPT_NOBODY => true, CURLOPT_FOLLOWLOCATION => false, CURLOPT_TIMEOUT => 10, CURLOPT_SSL_VERIFYPEER => false]);
         curl_exec($ch);
         $redirect = curl_getinfo($ch, CURLINFO_REDIRECT_URL);
-        curl_close($ch);
+        
         if ($redirect) self::cache('short_' . $url, $redirect, 'short_url');
         return $redirect ?: null;
     }
@@ -114,7 +114,7 @@ class DPlayerMAX_Bilibili_Parser
             if ($res !== false && curl_errno($ch) === 0 && curl_getinfo($ch, CURLINFO_HTTP_CODE) === 200) break;
             if ($i < 2) usleep(500000 * ($i + 1));
         }
-        curl_close($ch);
+        
         return $res ?: false;
     }
 
